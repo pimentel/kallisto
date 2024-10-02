@@ -166,6 +166,7 @@ void H5Converter::write_aux() {
       std::string(std::to_string(-1)),
       kal_version_,
       std::string(std::to_string(idx_version_)),
+      std::string("dummy k-mer length"),
       start_time_,
       call_
       );

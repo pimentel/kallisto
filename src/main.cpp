@@ -213,6 +213,7 @@ void ParseOptionsEM(int argc, char **argv, ProgramOptions& opt) {
   int plaintext_flag = 0;
   int write_index_flag = 0;
   int single_flag = 0;
+  int long_read_flag = 0; 
   int single_overhang_flag = 0;
   int strand_FR_flag = 0;
   int strand_RF_flag = 0;
@@ -221,13 +222,14 @@ void ParseOptionsEM(int argc, char **argv, ProgramOptions& opt) {
   int gbam_flag = 0;
   int fusion_flag = 0;
 
-  const char *opt_string = "t:i:l:s:o:n:m:d:b:g:c:p:";
+  const char *opt_string = "t:i:l:P:s:o:n:m:d:b:g:c:p:";
   static struct option long_options[] = {
     // long args
     {"verbose", no_argument, &verbose_flag, 1},
     {"plaintext", no_argument, &plaintext_flag, 1},
     {"write-index", no_argument, &write_index_flag, 1},
     {"single", no_argument, &single_flag, 1},
+    {"long", no_argument, &long_read_flag, 1}, 
     {"single-overhang", no_argument, &single_overhang_flag, 1},
     {"fr-stranded", no_argument, &strand_FR_flag, 1},
     {"rf-stranded", no_argument, &strand_RF_flag, 1},
@@ -240,6 +242,7 @@ void ParseOptionsEM(int argc, char **argv, ProgramOptions& opt) {
     {"threads", required_argument, 0, 't'},
     {"index", required_argument, 0, 'i'},
     {"fragment-length", required_argument, 0, 'l'},
+    {"platform", required_argument, 0, 'P'},
     {"sd", required_argument, 0, 's'},
     {"output-dir", required_argument, 0, 'o'},
     {"iterations", required_argument, 0, 'n'},
@@ -272,6 +275,10 @@ void ParseOptionsEM(int argc, char **argv, ProgramOptions& opt) {
     }
     case 'l': {
       stringstream(optarg) >> opt.fld;
+      break;
+    }
+    case 'P': {
+      stringstream(optarg) >> opt.platform;
       break;
     }
     case 's': {
@@ -335,6 +342,11 @@ void ParseOptionsEM(int argc, char **argv, ProgramOptions& opt) {
     opt.single_end = true;
   }
 
+  if (long_read_flag) {
+    opt.long_read = true;
+    opt.single_end = true;  
+  }
+
   if (single_overhang_flag) {
     opt.single_overhang = true;
   }
@@ -368,10 +380,11 @@ void ParseOptionsEM(int argc, char **argv, ProgramOptions& opt) {
 }
 
 void ParseOptionsTCCQuant(int argc, char **argv, ProgramOptions& opt) {
-  const char *opt_string = "o:i:T:e:f:l:s:t:g:G:b:d:p:";
+  const char *opt_string = "o:i:T:e:f:P:l:s:t:g:G:b:d:p:";
   int matrix_to_files = 0;
   int matrix_to_directories = 0;
   int plaintext_flag = 0;
+  int long_read_flag = 0; 
   static struct option long_options[] = {
     {"plaintext", no_argument, &plaintext_flag, 1},
     {"matrix-to-files", no_argument, &matrix_to_files, 1},
@@ -380,6 +393,8 @@ void ParseOptionsTCCQuant(int argc, char **argv, ProgramOptions& opt) {
     {"txnames", required_argument, 0, 'T'},
     {"threads", required_argument, 0, 't'},
     {"fragment-file", required_argument, 0, 'f'},
+    {"long", no_argument, &long_read_flag, 1}, 
+    {"platform", required_argument, 0, 'P'},
     {"fragment-length", required_argument, 0, 'l'},
     {"sd", required_argument, 0, 's'},
     {"output-dir", required_argument, 0, 'o'},
@@ -409,6 +424,11 @@ void ParseOptionsTCCQuant(int argc, char **argv, ProgramOptions& opt) {
     }
     case 'f': {
       stringstream(optarg) >> opt.fldFile;
+      break;
+    }
+    case 'P': {
+      stringstream(optarg) >> opt.platform;
+      std::transform(opt.platform.begin(), opt.platform.end(),opt.platform.begin(), ::toupper);
       break;
     }
     case 'l': {
@@ -457,6 +477,9 @@ void ParseOptionsTCCQuant(int argc, char **argv, ProgramOptions& opt) {
     }
     default: break;
     }
+  }
+  if (long_read_flag) {
+    opt.long_read = true; 
   }
   if (matrix_to_files) {
     opt.matrix_to_files = true;
@@ -507,6 +530,8 @@ void ParseOptionsBus(int argc, char **argv, ProgramOptions& opt) {
   int verbose_flag = 0;
   int gbam_flag = 0;
   int paired_end_flag = 0;  
+  int long_read_flag = 0; 
+  int unmapped_flag = 0; 
   int aa_flag = 0;
   int strand_FR_flag = 0;
   int strand_RF_flag = 0;
@@ -515,7 +540,7 @@ void ParseOptionsBus(int argc, char **argv, ProgramOptions& opt) {
   int batch_barcodes_flag = 0;
   int dfk_onlist_flag = 0;
 
-  const char *opt_string = "i:o:x:t:lbng:c:T:B:N:";
+  const char *opt_string = "i:o:x:t:lbng:c:T:P:r:e:B:N:";
   static struct option long_options[] = {
     {"verbose", no_argument, &verbose_flag, 1},
     {"dfk-onlist", no_argument, &dfk_onlist_flag, 1},
@@ -535,6 +560,11 @@ void ParseOptionsBus(int argc, char **argv, ProgramOptions& opt) {
     {"rf-stranded", no_argument, &strand_RF_flag, 1},
     {"unstranded", no_argument, &unstranded_flag, 1},
     {"paired", no_argument, &paired_end_flag, 1},
+    {"long", no_argument, &long_read_flag, 1}, 
+    {"platform", required_argument, 0, 'P'},
+    {"threshold", required_argument, 0, 'r'},
+    //{"error-rate", required_argument, 0, 'e'},
+    {"unmapped", no_argument, &unmapped_flag, 1},
     {"aa", no_argument, &aa_flag, 1},
     {"inleaved", no_argument, &interleaved_flag, 1},
     {"numReads", required_argument, 0, 'N'},
@@ -545,6 +575,7 @@ void ParseOptionsBus(int argc, char **argv, ProgramOptions& opt) {
   int list_flag = 0;
   int c;
   int option_index = 0;
+  
   while (true) {
     c = getopt_long(argc,argv,opt_string, long_options, &option_index);
 
@@ -587,6 +618,19 @@ void ParseOptionsBus(int argc, char **argv, ProgramOptions& opt) {
     }
     case 'n': {
       opt.num = true;
+      break;
+    }
+    case 'P': {
+      stringstream(optarg) >> opt.platform;
+      std::transform(opt.platform.begin(), opt.platform.end(),opt.platform.begin(), ::toupper);
+      break;
+    }
+    case 'e': {
+      stringstream(optarg) >> opt.error_rate;
+      break; 
+    }
+    case 'r': {
+      stringstream(optarg) >> opt.threshold; 
       break;
     }
     case 'N': {
@@ -668,6 +712,14 @@ void ParseOptionsBus(int argc, char **argv, ProgramOptions& opt) {
     opt.single_end = true;
   }
   
+  if (long_read_flag) {
+    opt.long_read = true; 
+  }
+
+  if (unmapped_flag) {
+    opt.unmapped = true; 
+  }  
+
   if (interleaved_flag) {
     opt.input_interleaved_nfiles = 1;
   }
@@ -845,6 +897,16 @@ void ParseOptionsH5Dump(int argc, char **argv, ProgramOptions& opt) {
 }
 
 bool CheckOptionsBus(ProgramOptions& opt) {
+  // Initialize BUS options (to ensure no variables are uninitialized for good measure); BUS options shouldn't be intialized before this
+  opt.busOptions.nfiles = 1;
+  opt.busOptions.keep_fastq_comments = false;
+  opt.busOptions.paired = false;
+  opt.busOptions.long_read = false;
+  opt.busOptions.unmapped = false;
+  opt.busOptions.error_rate = 0.0;
+  opt.busOptions.threshold = 0.8;
+  opt.busOptions.aa = false;
+  
   bool ret = true;
 
   cerr << endl;
@@ -873,6 +935,17 @@ bool CheckOptionsBus(ProgramOptions& opt) {
   if (opt.max_num_reads < 0) {
     std::cerr << ERROR_STR << " --numReads must be a positive number" << std::endl;
     ret = false;
+  }
+
+  if (opt.long_read && !(0 < opt.threshold < 1)) { 
+     std::cerr << "Threshold not in (0,1). Setting default threshold for unmapped kmers to 0.8" << std::endl;
+     opt.threshold = 0.8;
+  }
+
+  if (opt.long_read) { //opt.error_rate <= 0) {
+    //hiding for release, not used for this version
+    //std::cerr << "No sequencing error-rate: invalid error-rate; must be greater than zero" << std::endl; 
+    //ret = false; 
   }
 
   // check files
@@ -1104,6 +1177,11 @@ bool CheckOptionsBus(ProgramOptions& opt) {
         busopt.seq.push_back(BUSOptionSubstr(1,0,0));
         busopt.paired = true;
       }
+      if (opt.long_read) {
+	      busopt.long_read = true; 
+	      busopt.paired = false; 
+        busopt.error_rate = opt.error_rate; 
+      }
       busopt.umi.push_back(BUSOptionSubstr(-1,-1,-1));
     }
     return ret;
@@ -1164,6 +1242,8 @@ bool CheckOptionsBus(ProgramOptions& opt) {
     auto& busopt = opt.busOptions;
     busopt.aa = opt.aa;
 
+    busopt.long_read = opt.long_read;
+    busopt.threshold = opt.threshold; 
     busopt.paired = false;
     busopt.keep_fastq_comments = false;
     if (opt.bam) busopt.nfiles = 1; // Note: only 10xV2 has been tested
@@ -1273,7 +1353,9 @@ bool CheckOptionsBus(ProgramOptions& opt) {
       if (!opt.single_end) {
         busopt.nfiles++;
         busopt.seq.push_back(BUSOptionSubstr(3,0,0));
-        busopt.paired = true;
+        if (!opt.long_read) {
+          busopt.paired = true;
+        }
       }
     } else if (opt.technology == "BDWTA") {
       busopt.nfiles = 2;
@@ -1299,7 +1381,7 @@ bool CheckOptionsBus(ProgramOptions& opt) {
       //bool invalid = ParseTechnology(opt.technology, values, files, errorList, bcValues);
       bool valid = ParseTechnology(opt.technology, busopt, errorList);
       
-      if (busopt.seq.size() == 2 && !opt.single_end) {
+      if (busopt.seq.size() == 2 && !opt.single_end && !opt.long_read) {
         busopt.paired = true;
       }
       
@@ -1357,7 +1439,7 @@ bool CheckOptionsBus(ProgramOptions& opt) {
     }
   }
 
-  if (!opt.single_end && !opt.busOptions.paired) {
+  if (!opt.single_end && !opt.busOptions.paired && !opt.long_read) {
       cerr << "Error: Paired reads are not compatible with the specified technology" << endl;
       ret = false;
   }
@@ -1526,12 +1608,12 @@ bool CheckOptionsEM(ProgramOptions& opt, bool emonly = false) {
     }
 
     /*
-    if (opt.strand_specific && !opt.single_end) {
+    if (opt.strand_specific && !opt.single_end && !opt.long_read) {
       cerr << "Error: strand-specific mode requires single-end mode" << endl;
       ret = false;
     }*/
 
-    if (!opt.single_end) {
+    if (!opt.single_end && !opt.long_read) {
       if (opt.files.size() % 2 != 0) {
         cerr << "Error: paired-end mode requires an even number of input files" << endl
             << "       (use --single for processing single-end reads)" << endl;
@@ -1545,7 +1627,7 @@ bool CheckOptionsEM(ProgramOptions& opt, bool emonly = false) {
     ret = false;
   }
 
-  if (opt.single_end && (opt.fld == 0.0 || opt.sd == 0.0)) {
+  if ((opt.single_end && !opt.long_read) && (opt.fld == 0.0 || opt.sd == 0.0)) {
     cerr << "Error: fragment length mean and sd must be supplied for single-end reads using -l and -s" << endl;
     ret = false;
   } else if (opt.fld == 0.0 && ret) {
@@ -1998,6 +2080,10 @@ void usageBus() {
        << "    --rf-stranded             Strand specific reads for UMI-tagged reads, first read reverse" << endl
        << "    --unstranded              Treat all read as non-strand-specific" << endl
        << "    --paired                  Treat reads as paired" << endl
+       << "    --long                    Treat reads as long" << endl
+       //<< "    --error_rate              Estimated error rate of long reads (required for --long)" << endl
+       << "    --threshold               Threshold for rate of unmapped kmers per read" << endl
+       //<< "    --unmapped		              Computed ratio of unmapped kmers for first 1M reads and output unmapped reads" << endl 
        << "    --aa                      Align to index generated from a FASTA-file containing amino acid sequences" << endl
        << "    --inleaved                Specifies that input is an interleaved FASTQ file" << endl
        << "    --batch-barcodes          Records both batch and extracted barcode in BUS file" << endl
@@ -2104,6 +2190,8 @@ void usageTCCQuant(bool valid_input = true) {
        << "                              (default: equivalence classes are taken from the index)" << endl
        << "-f, --fragment-file=FILE      File containing fragment length distribution" << endl
        << "                              (default: effective length normalization is not performed)" << endl
+       << "--long                        Use version of EM for long reads " << endl 
+       << "-P, --platform.               [PacBio or ONT] used for sequencing " << endl 
        << "-l, --fragment-length=DOUBLE  Estimated average fragment length" << endl
        << "-s, --sd=DOUBLE               Estimated standard deviation of fragment length" << endl
        << "                              (note: -l, -s values only should be supplied when" << endl
@@ -2207,7 +2295,8 @@ int main(int argc, char *argv[]) {
         usageBus();
         return 0;
       }
-      ParseOptionsBus(argc-1, argv+1,opt);
+      
+      ParseOptionsBus(argc-1, argv+1,opt);	    
       int64_t num_processed = 0;
       if (!CheckOptionsBus(opt)) {
         usageBus();
@@ -2228,9 +2317,31 @@ int main(int argc, char *argv[]) {
         opt.bus_mode = true; // bus_mode = !batch_mode (however, if either is true, means we're writing BUS file)
         opt.single_end = false;
       }
-      
+
       KmerIndex index(opt);
       index.load(opt);
+
+      if (opt.long_read) {
+         double error_rate_threshold_tmp = ((1.0/opt.error_rate - 2*index.k) * opt.error_rate);
+            //std::cerr << "Suggested threshold for novel reads to " << error_rate_threshold_tmp << std::endl;
+	    if (1 > opt.threshold > 0) {
+               //std::cerr << "Using supplied threshold " << opt.threshold << std::endl;  
+            } else if (0 < error_rate_threshold_tmp < 1) {
+               opt.threshold = error_rate_threshold_tmp;
+               std::cerr << "Using computed threshold " << opt.threshold << std::endl;
+            } else {
+               opt.threshold = .8; 
+	             std::cerr << "Supplied and computed threshold are invalid, using default value of " << opt.threshold << std::endl; 
+    	    }	
+	    /***
+            int suggested_k = int((1.0/opt.error_rate)/2.0) - 1; 
+            if (suggested_k % 2 == 0) {
+               std::cerr << "Suggested kmer length for error rate is: " << suggested_k-1 << std::endl;
+            } else {
+               std::cerr << "Suggested kmer length for error rate is: " << suggested_k << std::endl;
+            }
+	    ***/
+      }
 
       bool guessChromosomes = true;
       Transcriptome model; // empty
@@ -2263,21 +2374,56 @@ int main(int argc, char *argv[]) {
         if (!opt.single_end || opt.technology.empty() || opt.busOptions.paired || opt.busOptions.umi[0].fileno == -1) {
           index.write((opt.output + "/index.saved"), false, opt.threads);
         }
-        // Write out fragment length distributions if reads paired-end:
-        if (!opt.single_end) {
+        // Write out fragment length distributions if reads paired-end or long:
+        if (!opt.single_end || opt.long_read) {
+	        std::remove((opt.output + "/flens.txt").c_str()); 
           std::ofstream flensout_f((opt.output + "/flens.txt"));
           for (size_t id = 0; id < opt.batch_ids.size(); id++) {
-            std::vector<uint32_t> fld = MP.batchFlens[id];
-            for ( size_t i = 0 ; i < fld.size(); ++i ) {
-              if (i != 0) {
-                flensout_f << " ";
-              }
-              flensout_f << fld[i];
-            }
-            flensout_f << "\n";
-          }
-          flensout_f.close();
-        }
+            if (opt.long_read) {
+		    //Should I be using batchFlens?
+	            std::vector<uint32_t> fld_lr = MP.batchFlens_lr[id];
+	            std::vector<uint32_t> fld_lr_c = MP.batchFlens_lr_c[id];
+ 	            for ( size_t i = 0 ; i < fld_lr.size(); ++i ) {
+            	        if (i != 0) {
+              	            flensout_f << " ";
+              	         }
+              	         if (fld_lr_c[i] > 0.5) {
+		             //Good results with comment below. 
+		             //flensout_f << std::fabs((double)fld_lr[i] / (double)fld_lr_c[i] - index.k);//index.target_lens_[i] - (double)fld_lr[i] / (double)fld_lr_c[i] - k); // take mean of recorded uniquely aligning read lengths 
+ 		             flensout_f << std::fabs(((double)fld_lr[i] / (double)fld_lr_c[i]) - index.k);
+		         } else {
+		              flensout_f << std::fabs(index.target_lens_[i] - index.k);//index.target_lens_[i]); 
+		         }
+	             }
+                     flensout_f << "\n";
+	      } else {
+		std::vector<uint32_t> fld = MP.batchFlens[id];	
+		for ( size_t i = 0 ; i < fld.size(); ++i ) {
+            	  if (i != 0) {
+              	    flensout_f << " ";
+              	  }
+              	  flensout_f << fld[i];
+            	}
+            	flensout_f << "\n";
+     	     }     
+           }
+           flensout_f.close();
+            
+         if (opt.unmapped) {
+            std::ofstream um_f((opt.output + "/unmapped_ratio.txt"));
+            for (size_t id = 0; id < opt.batch_ids.size(); id++) {
+                std::vector<double> unmapped_l = MP.tc.unmapped_list;
+                for ( size_t i = 0 ; i < unmapped_l.size(); ++i ) {
+                  if (i != 0) {
+                    um_f << ",";
+                  }
+                  um_f << unmapped_l[i];
+                }
+                um_f << ",";
+             }
+             um_f.close();
+           }
+         }
       } else {
         num_processed = ProcessBUSReads(MP, opt);
         for (int i = 0; i <= 32; i++) {
@@ -2318,12 +2464,14 @@ int main(int argc, char *argv[]) {
           }
         }
         std::vector<uint32_t> fld;
-        if (opt.busOptions.paired) {
+	      std::vector<uint32_t> fld_c;
+        if (opt.busOptions.paired && !opt.long_read) {
           fld = collection.flens; // copy
           collection.compute_mean_frag_lens_trunc();
           // Write out index:
           index.write((opt.output + "/index.saved"), false, opt.threads);
           // Write out fragment length distribution:
+	        std::remove((opt.output + "/flens.txt").c_str()); 
           std::ofstream flensout_f((opt.output + "/flens.txt"));
           for ( size_t i = 0 ; i < fld.size(); ++i ) {
             if (i != 0) {
@@ -2333,12 +2481,44 @@ int main(int argc, char *argv[]) {
           }
           flensout_f << "\n";
           flensout_f.close();
-        } else if (opt.busOptions.umi[0].fileno == -1) {
+        } else if (opt.long_read) {
+	        opt.busOptions.threshold = opt.threshold;
+          fld = collection.flens_lr; // copy
+	        fld_c = collection.flens_lr_c; //copy 
+          // Write out index:
+          index.write((opt.output + "/index.saved"), false, opt.threads);
+          // Write out fragment length distribution:
+	        std::remove((opt.output + "/flens.txt").c_str()); 
+          std::ofstream flensout_f((opt.output + "/flens.txt"));
+          for ( size_t i = 0 ; i < fld.size(); ++i ) {
+            if (i > 0.0001) {
+              flensout_f << " ";
+            }
+            if (fld_c[i] > 0.5) {
+	      flensout_f << std::fabs((double)fld[i] / (double)fld_c[i] - index.k);//index.target_lens_[i] - (double)fld[i] / (double)fld_c[i] - k); // take mean of recorded uniquely aligning read lengths 
+ 	    } else {
+	      flensout_f << std::fabs(index.target_lens_[i] - index.k); //index.target_lens_[i] - 31); 
+	    }
+          }
+          flensout_f << "\n";
+          flensout_f.close();
+          std::cerr << "Finished fragment length write out line 2487" << std::endl;
+          if (opt.unmapped) {
+            std::ofstream um_f((opt.output + "/unmapped_ratio.txt"));
+                std::vector<double> unmapped_l = collection.unmapped_list;
+                for ( size_t i = 0 ; i < unmapped_l.size(); ++i ) {
+                  if (i != 0) {
+                    um_f << ",";
+                  } 
+                  um_f << unmapped_l[i];
+                }
+             um_f.close();
+           }
+	} else if (opt.busOptions.umi[0].fileno == -1) {
           // Write out index:
           index.write((opt.output + "/index.saved"), false, opt.threads);
         }
       }
-      
       writeECList(ecfilename, index);
       
       // write transcript names
@@ -2347,6 +2527,7 @@ int main(int argc, char *argv[]) {
         transout_f << index.target_names_[i] << "\n";
       }
       transout_f.close();
+      
       
       for (const auto& elem : index.ecmapinv) {
         if (elem.first.cardinality() == 1) {
@@ -2496,6 +2677,7 @@ int main(int argc, char *argv[]) {
             std::string(std::to_string(num_unique)),
             KALLISTO_VERSION,
             std::string(std::to_string(index.INDEX_VERSION)),
+            std::string(std::to_string(index.k)),
             start_time,
             call,
             opt.aa ? std::to_string(collection.cardinality_clashes) : "");
@@ -2707,7 +2889,7 @@ int main(int argc, char *argv[]) {
         size_t num_trans = index.num_trans;
 
         const bool calcEffLen = !opt.fldFile.empty() || opt.fld != 0.0;
-        if (calcEffLen && !opt.fldFile.empty()) { // Parse supplied fragment length distribution file
+        if (calcEffLen && !opt.fldFile.empty() && (!opt.long_read || opt.platform == "PACBIO")) { // Parse supplied fragment length distribution file
           std::ifstream infld((opt.fldFile));
           if (infld.is_open()) {
             std::string line;
@@ -2728,14 +2910,14 @@ int main(int argc, char *argv[]) {
                 }
                 tmp_vec.push_back(tmp_val_num);
               }
-              if (tmp_vec.size() != MAX_FRAG_LEN) {
+              if (tmp_vec.size() != MAX_FRAG_LEN && tmp_vec.size() != index.target_lens_.size()) {
                 std::cerr << "Error: Fragment length distribution file contains a line with "
                           << tmp_vec.size() << " values; expected: " << MAX_FRAG_LEN << std::endl;
                 exit(1);
               }
               FLDs.push_back(tmp_vec);
             }
-            if (FLDs.size() != 1 && FLDs.size() != nrow) {
+            if (FLDs.size() != 1 && (FLDs.size() != nrow && FLDs.size() != index.target_lens_.size())) {
               std::cerr << "Error: Fragment length distribution file contains "
                         << FLDs.size() << " valid lines; expected: " << nrow << std::endl;
               exit(1);
@@ -2753,7 +2935,7 @@ int main(int argc, char *argv[]) {
         }
         const bool gene_level_counting = !opt.genemap.empty() || !opt.gtfFile.empty();
 
-        std::cerr << "[quant] Running EM algorithm..."; std::cerr.flush();
+        std::cerr << "[quant] Running EM algorithm..." << std::endl;
 
         std::vector<double> priors;
         if (opt.priors != "") {
@@ -2768,7 +2950,7 @@ int main(int argc, char *argv[]) {
           }
 
           std::vector<double> fl_means;
-          if (calcEffLen) {
+          if (calcEffLen && (!opt.long_read || !(opt.platform == "ONT"))) {
             if (opt.fld != 0.0) {
               collection.init_mean_fl_trunc(opt.fld, opt.sd);
             } else {

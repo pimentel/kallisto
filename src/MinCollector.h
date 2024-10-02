@@ -21,6 +21,9 @@ struct MinCollector {
       index(ind),
       counts(index.ecmapinv.size(), 0),
       flens(MAX_FRAG_LEN),
+      unmapped_list(3000000),
+      flens_lr(index.target_lens_.size()),
+      flens_lr_c(index.target_lens_.size()),
       bias3(4096),
       bias5(4096),
       min_range(opt.min_range),
@@ -51,6 +54,8 @@ struct MinCollector {
   int decreaseCount(const int ec);
 
   Roaring intersectECs(std::vector<std::pair<const_UnitigMap<Node>, int32_t>>& v) const;
+  Roaring intersectECs_long(std::vector<std::pair<const_UnitigMap<Node>, int32_t>>& v) const;
+  Roaring modeECs(std::vector<std::pair<const_UnitigMap<Node>, int32_t>>& v) const;
   int intersectKmersCFC(std::vector<std::pair<const_UnitigMap<Node>, int32_t>>& v1,
                           std::vector<std::pair<const_UnitigMap<Node>, int32_t>>& v3, 
                           std::vector<std::pair<const_UnitigMap<Node>, int32_t>>& v4, 
@@ -58,6 +63,8 @@ struct MinCollector {
                           std::vector<std::pair<const_UnitigMap<Node>, int32_t>>& v6,
                           std::vector<std::pair<const_UnitigMap<Node>, int32_t>>& v7, Roaring& r) const;
   int intersectKmers(std::vector<std::pair<const_UnitigMap<Node>, int32_t>>& v1,
+                    std::vector<std::pair<const_UnitigMap<Node>, int32_t>>& v2, bool nonpaired, Roaring& r) const;
+  int modeKmers(std::vector<std::pair<const_UnitigMap<Node>, int32_t>>& v1,
                     std::vector<std::pair<const_UnitigMap<Node>, int32_t>>& v2, bool nonpaired, Roaring& r) const;
   int findEC(const std::vector<int32_t>& u) const;
 
@@ -88,6 +95,9 @@ struct MinCollector {
   KmerIndex& index;
   std::vector<uint32_t> counts;
   std::vector<uint32_t> flens;
+  std::vector<double> unmapped_list;
+  std::vector<uint32_t> flens_lr;
+  std::vector<uint32_t> flens_lr_c;
   std::vector<int32_t> bias3, bias5;
   int min_range;
   int k;

@@ -4,6 +4,23 @@ project(kallisto)
 
 include(GNUInstallDirs)
 
+if(NOT MAX_KMER_SIZE)
+set(MAX_KMER_SIZE "32")
+endif()
+
+set(DO_ENABLE_AVX2 "")
+set(DO_ENABLE_COMPILATION_ARCH "")
+if(ENABLE_AVX2 MATCHES "OFF")
+add_compile_definitions("ENABLE_AVX2=OFF")
+set(DO_ENABLE_AVX2 "-DENABLE_AVX2=OFF")
+endif(ENABLE_AVX2 MATCHES "OFF")
+if(COMPILATION_ARCH MATCHES "OFF")
+add_compile_definitions("COMPILATION_ARCH=OFF")
+set(DO_ENABLE_COMPILATION_ARCH "-DCOMPILATION_ARCH=OFF")
+endif(COMPILATION_ARCH MATCHES "OFF")
+
+add_compile_definitions("MAX_KMER_SIZE=${MAX_KMER_SIZE}")
+
 
 option(USE_HDF5 "Compile with HDF5 support" OFF) #OFF by default
 option(USE_BAM "Compile with HTSLIB support" OFF) # OFF by default
@@ -73,7 +90,7 @@ ExternalProject_Add(bifrost
     PREFIX ${PROJECT_SOURCE_DIR}/ext/bifrost
     SOURCE_DIR ${PROJECT_SOURCE_DIR}/ext/bifrost
     BUILD_IN_SOURCE 1
-    CONFIGURE_COMMAND mkdir -p build && cd build && cmake .. -DCMAKE_INSTALL_PREFIX=${PREFIX} -DCMAKE_CXX_FLAGS=${PROJECT_BIFROST_CMAKE_CXX_FLAGS}
+    CONFIGURE_COMMAND mkdir -p build && cd build && cmake .. -DMAX_KMER_SIZE=${MAX_KMER_SIZE} -DCMAKE_INSTALL_PREFIX=${PREFIX} -DCMAKE_CXX_FLAGS=${PROJECT_BIFROST_CMAKE_CXX_FLAGS} ${DO_ENABLE_AVX2} ${DO_ENABLE_COMPILATION_ARCH}
     BUILD_COMMAND cd build && make
     INSTALL_COMMAND ""
 )

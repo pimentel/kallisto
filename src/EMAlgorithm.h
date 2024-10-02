@@ -85,7 +85,7 @@ struct EMAlgorithm {
     if (alpha_.size() == priors.size()) {
 
       alpha_.assign(priors.begin(), priors.end());
-    } else {
+    } else if (priors.size() != 0) {
 
       std::cerr << "[   em] number of priors does not match number of transcripts." << std::endl;
       std::cerr << "        defaulting to uniform priors." << std::endl;
@@ -108,6 +108,7 @@ struct EMAlgorithm {
     }
 
     int i;
+    if (!opt.long_read || (opt.long_read && opt.platform == "ONT")){
     for (i = 0; i < n_iter; ++i) {
       if (recomputeEffLen && (i == min_rounds || i == min_rounds + 500)) {
         eff_lens_ = update_eff_lens(all_fl_means, tc_, index_, alpha_, eff_lens_, post_bias_, opt);
@@ -219,6 +220,140 @@ struct EMAlgorithm {
         }
       }
 
+    }
+    } else {
+      for (i = 0; i < n_iter; ++i) {
+      if (recomputeEffLen && (i == min_rounds || i == min_rounds + 500) && !opt.long_read) {
+        eff_lens_ = update_eff_lens(all_fl_means, tc_, index_, alpha_, eff_lens_, post_bias_, opt);
+        weight_map_ = calc_weights (tc_.counts, index_.ecmapinv, eff_lens_);
+      }
+      
+      if (recomputeEffLen && (i == min_rounds || i % min_rounds == 0) && opt.long_read) {
+        weight_map_ = calc_weights (tc_.counts, index_.ecmapinv, eff_lens_);
+      }
+
+
+      /*** should this go after main loop? 
+      for (const auto& it : ecmapinv_) {
+        if (it.first.cardinality() == 1) {
+          next_alpha[it.first.maximum()] = counts_[it.second];
+          //std::cerr << "cardinality 1 : " << it.first.maximum() << " it.second: " << it.second << " counts_[it.second]: " << counts_[it.second] << std::endl; std::cerr.flush(); 
+        }
+      }
+      ***/
+
+      for (const auto& it : ecmapinv_) {
+        if (it.first.cardinality() == 1) { // Individual transcript
+          //std::cerr << "Should always enter here with toy error free simulation" << std::endl; std::cerr.flush(); 
+          continue;
+        }
+
+        denom = 0.0;
+
+        if (counts_[it.second] == 0) {
+          continue;
+        }
+
+        // first, compute the denominator: a normalizer
+        // iterate over targets in EC map
+        auto& wv = weight_map_[it.second];
+
+        // everything in ecmap should be in weight_map
+        //assert( w_search != weight_map_.end() );
+        //assert( w_search->second.size() == ec_kv.second.size() );
+
+        // wv is weights vector
+        // trs is a vector of transcript ids
+
+        auto& r = it.first; //ecmap_.find(ec)->second;
+        auto numEC = r.cardinality();
+        uint32_t* trs = new uint32_t[numEC];
+        r.toUint32Array(trs);
+
+        for (auto t_it = 0; t_it < numEC; ++t_it) {
+          denom += alpha_[trs[t_it]] * wv[t_it];
+        }
+
+        if (denom < TOLERANCE) {
+          continue;
+        }
+
+        // compute the update step
+        auto countNorm = counts_[it.second] / denom;
+        
+        //std::cerr << "countNorm: " << countNorm << std::endl; std::cerr.flush();
+        //std::cerr <<"numEC is " << numEC << std::endl; std::cerr.flush(); 
+        for (auto t_it = 0; t_it < numEC; ++t_it) {
+          //std::cerr <<"t_it is: " << t_it << ", alpha is: " << alpha_[trs[t_it]] << " wv[t_it] is: " << wv[t_it] << " trs[t_it] is:" << trs[t_it] << std::endl; std::cerr.flush(); 
+          next_alpha[trs[t_it]] += (wv[t_it] * alpha_[trs[t_it]]) * countNorm;
+        }
+
+        delete[] trs;
+        trs = nullptr;
+
+      }
+
+      // TODO: check for relative difference for convergence in EM
+
+      bool stopEM = false; //!finalRound && (i >= min_rounds); // false initially
+      //double maxChange = 0.0;
+      int chcount = 0;
+      for (int ec = 0; ec < num_trans_; ec++) {
+        if (next_alpha[ec] > alpha_change_limit && (std::fabs(next_alpha[ec] - alpha_[ec]) / next_alpha[ec]) > alpha_change) {
+          chcount++;
+        }
+
+        //if (stopEM && next_alpha[ec] >= alpha_limit) {
+
+          /* double reldiff = abs(next_alpha[ec]-alpha_[ec]) / next_alpha[ec];
+          if (reldiff >= alpha_change) {
+            stopEM = false;
+            }*/
+        //}
+
+        /*
+        if (next_alpha[ec] > alpha_limit) {
+          maxChange = std::max(maxChange,std::fabs(next_alpha[ec]-alpha_[ec]) / next_alpha[ec]);
+        }
+        */
+        // reassign alpha_ to next_alpha
+        alpha_[ec] = next_alpha[ec];
+
+        // clear all next_alpha values 0 for next iteration
+        next_alpha[ec] = 0.0;
+      }
+
+      //std::cout << chcount << std::endl;
+      if (chcount == 0 && i > min_rounds) {
+
+        stopEM=true;
+      }
+
+      if (finalRound) {
+        break;
+      }
+
+      // std::cout << maxChange << std::endl;
+      if (stopEM) {
+        finalRound = true;
+        alpha_before_zeroes_.resize( alpha_.size() );
+        for (int ec = 0; ec < num_trans_; ec++) {
+          alpha_before_zeroes_[ec] = alpha_[ec];
+          if (alpha_[ec] < alpha_limit/10.0) {
+            alpha_[ec] = 0.0;
+          }
+        }
+      }
+
+    }
+
+    //TRYING PLACING HERE INSTEAD 
+    for (const auto& it : ecmapinv_) {
+      if (it.first.cardinality() == 1) {
+        alpha_[it.first.maximum()] += counts_[it.second];
+        //std::cerr << "cardinality 1 : " << it.first.maximum() << " it.second: " << it.second << " counts_[it.second]: " << counts_[it.second] << std::endl; std::cerr.flush(); 
+      }
+    }
     }
 
     // ran for the maximum number of iterations

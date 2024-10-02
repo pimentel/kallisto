@@ -121,10 +121,12 @@ int64_t ProcessBatchReads(MasterProcessor& MP, const ProgramOptions& opt) {
   size_t numreads = 0;
   size_t nummapped = 0;
 
-  bool paired = !opt.single_end;
+  bool paired = !opt.single_end && !opt.long_read;
 
   if (paired) {
     std::cerr << "[quant] running in paired-end mode" << std::endl;
+  } else if (opt.long_read) {
+    std::cerr << "[quant] running in long read mode" << std::endl;    
   } else {
     std::cerr << "[quant] running in single-end mode" << std::endl;
   }
@@ -171,11 +173,13 @@ int64_t ProcessReads(MasterProcessor& MP, const  ProgramOptions& opt) {
   //int tlencount = (opt.fld == 0.0) ? 10000 : 0;
   size_t numreads = 0;
   size_t nummapped = 0;
-  bool paired = !opt.single_end;
+  bool paired = !opt.single_end && !opt.long_read;
 
 
   if (paired) {
     std::cerr << "[quant] running in paired-end mode" << std::endl;
+  } else if (opt.long_read) {
+    std::cerr << "[quant] running in long read mode" << std::endl;    
   } else {
     std::cerr << "[quant] running in single-end mode" << std::endl;
   }
@@ -214,7 +218,6 @@ int64_t ProcessReads(MasterProcessor& MP, const  ProgramOptions& opt) {
   if (nummapped == 0) {
     std::cerr << "[~warn] no reads pseudoaligned." << std::endl;
   }
-
   // write output to outdir
   if (opt.write_index) {
     std::string outfile = opt.output + "/counts.txt";
@@ -223,7 +226,6 @@ int64_t ProcessReads(MasterProcessor& MP, const  ProgramOptions& opt) {
     MP.tc.write(of);
     of.close();
   }
-
 
   return numreads;
 }
@@ -237,7 +239,7 @@ int64_t ProcessBUSReads(MasterProcessor& MP, const  ProgramOptions& opt) {
   //int tlencount = (opt.fld == 0.0) ? 10000 : 0;
   size_t numreads = 0;
   size_t nummapped = 0;
-  bool paired = !opt.single_end;
+  bool paired = !opt.single_end && !opt.long_read;
 
   for (int i = 0, si=1; i < opt.files.size(); si++) {
     auto& busopt = opt.busOptions;
@@ -268,7 +270,6 @@ int64_t ProcessBUSReads(MasterProcessor& MP, const  ProgramOptions& opt) {
   if (nummapped == 0) {
     std::cerr << "[~warn] no reads pseudoaligned." << std::endl;
   }
-
   return numreads;
 }
 
@@ -358,7 +359,7 @@ void MasterProcessor::processReads() {
         batchSR.files = opt.batch_files[id+i];
         batchSR.nfiles = opt.batch_files[id+i].size();
         batchSR.reserveNfiles(opt.batch_files[id+i].size());
-        batchSR.paired = !opt.single_end;
+        batchSR.paired = !opt.single_end && !opt.long_read;
         FSRs.push_back(std::move(batchSR));
       }
       
@@ -394,7 +395,7 @@ void MasterProcessor::processReads() {
 
 void MasterProcessor::update(const std::vector<uint32_t>& c, const std::vector<Roaring> &newEcs,
                             std::vector<std::pair<Roaring, std::string>>& ec_umi, std::vector<std::pair<Roaring, std::string>> &new_ec_umi,
-                            int n, std::vector<int>& flens, std::vector<int> &bias, const PseudoAlignmentBatch& pseudobatch, std::vector<BUSData> &bv, std::vector<std::pair<BUSData, Roaring>> newBP, int *bc_len, int *umi_len,  int id, int local_id) {
+                            int n, std::vector<int>& flens, std::vector<double>& unmapped_list, std::vector<int>& flens_lr, std::vector<int>& flens_lr_c, std::vector<int> &bias, const PseudoAlignmentBatch& pseudobatch, std::vector<BUSData> &bv, std::vector<std::pair<BUSData, Roaring>> newBP, int *bc_len, int *umi_len,  int id, int local_id) {
   // acquire the writer lock
   std::lock_guard<std::mutex> lock(this->writer_lock);
   size_t num_new_ecs = 0;
@@ -470,6 +471,45 @@ void MasterProcessor::update(const std::vector<uint32_t>& c, const std::vector<R
       tlencount += local_tlencount;
     }
   }
+  if (opt.unmapped) {
+     if (opt.batch_mode) {
+	/***for (int i = 0; i < batchUnmapped_list[id].size(); i++) {
+          std::cerr << batchUnmapped_list[id][i] << "," << std::endl; 
+	  tc.unmapped_list.push_back(batchUnmapped_list[id][i]);
+       }***/
+       for (int i = 0; i < unmapped_list.size(); i++) {
+          //std::cerr << unmapped_list[i] << "," << std::endl; 
+          tc.unmapped_list.push_back(unmapped_list[i]);
+       }
+     } else {
+       for (int i = 0; i < unmapped_list.size(); i++) {
+          tc.unmapped_list.push_back(unmapped_list[i]);
+       }
+     }
+  }
+
+  if (!flens_lr.empty()) {
+    if (opt.batch_mode) {
+      auto &bflen_lr = batchFlens_lr[id];
+      auto &bflen_lr_c = batchFlens_lr_c[id];
+      auto &tcount = batchFlens_lr_c[id];
+      for (int i = 0; i < flens_lr.size(); i++) {
+        flens_lr[i] += bflen_lr[i];
+        flens_lr_c[i] += bflen_lr_c[i];
+	tcount[i] += bflen_lr_c[i];
+      }
+
+    } else {
+      auto &local_tlencount = flens_lr_c;
+      for (int i = 0; i < flens_lr.size(); i++) {
+        tc.flens_lr[i] += flens_lr[i];
+        tc.flens_lr_c[i] += flens_lr_c[i];
+        local_tlencount[i] += flens_lr_c[i];
+        tlencount += local_tlencount[i];
+      }
+    }
+  }
+
 
   if (!bias.empty()) {
     int local_biasCount = 0;
@@ -562,7 +602,7 @@ void MasterProcessor::update(const std::vector<uint32_t>& c, const std::vector<R
   attempt_transfer_ecs(num_new_ecs);
 
   numreads += n;
-  
+ 
   //if (opt.verbose) {
     counter += n;
     if (counter >= 1000000) {
@@ -800,9 +840,16 @@ void MasterProcessor::outputFusion(const std::stringstream &o) {
   }
 }
 
+void MasterProcessor::outputNovel(const std::stringstream &o) {
+  std::string os = o.str();
+  if (!os.empty()) {
+    std::lock_guard<std::mutex> lock(this->writer_lock);
+    ofusion << os << "\n";
+  }
+}
 
 ReadProcessor::ReadProcessor(const KmerIndex& index, const ProgramOptions& opt, const MinCollector& tc, MasterProcessor& mp, int _id, int _local_id) :
- paired(!opt.single_end), tc(tc), index(index), mp(mp), id(_id), local_id(_local_id) {
+ paired(!opt.single_end && !opt.long_read), tc(tc), index(index), mp(mp), id(_id), local_id(_local_id) {
    // initialize buffer
    bufsize = mp.bufsize;
    buffer = new char[bufsize];
@@ -812,11 +859,12 @@ ReadProcessor::ReadProcessor(const KmerIndex& index, const ProgramOptions& opt, 
      batchSR.files = opt.batch_files[id];
      batchSR.nfiles = opt.batch_files[id].size();
      batchSR.reserveNfiles(opt.batch_files[id].size());
-     batchSR.paired = !opt.single_end;
+     batchSR.paired = !opt.single_end && !opt.long_read;
    }
 
    seqs.reserve(bufsize/50);
    newEcs.reserve(1000);
+   if (opt.unmapped) unmapped_list.reserve(seqs.size()); 
    counts.reserve((int) (tc.counts.size() * 1.25));
    clear();
 }
@@ -837,6 +885,9 @@ ReadProcessor::ReadProcessor(ReadProcessor && o) :
   umis(std::move(o.umis)),
   newEcs(std::move(o.newEcs)),
   flens(std::move(o.flens)),
+  unmapped_list(std::move(o.unmapped_list)),
+  flens_lr(std::move(o.flens_lr)),
+  flens_lr_c(std::move(o.flens_lr_c)),
   bias5(std::move(o.bias5)),
   batchSR(std::move(o.batchSR)),
   counts(std::move(o.counts)) {
@@ -881,7 +932,7 @@ void ReadProcessor::operator()() {
 
     // update the results, MP acquires the lock
     std::vector<BUSData> tmp_v{};
-    mp.update(counts, newEcs, ec_umi, new_ec_umi, paired ? seqs.size()/2 : seqs.size(), flens, bias5, pseudobatch, tmp_v, std::vector<std::pair<BUSData, Roaring>>{}, nullptr, nullptr, id, local_id);
+    mp.update(counts, newEcs, ec_umi, new_ec_umi, paired ? seqs.size()/2 : seqs.size(), flens, unmapped_list, flens_lr, flens_lr_c, bias5, pseudobatch, tmp_v, std::vector<std::pair<BUSData, Roaring>>{}, nullptr, nullptr, id, local_id);
     clear();
   }
 }
@@ -899,20 +950,41 @@ void ReadProcessor::processBuffer() {
   const char* s2 = 0;
   int l1, l2;
 
-  bool findFragmentLength = (mp.opt.fld == 0) && (mp.tlencount < 10000);
+  bool findFragmentLength; 
+  if (mp.opt.long_read) {
+    findFragmentLength = (mp.tlencount < 1000000); 
+  } else {
+    findFragmentLength = (mp.opt.fld == 0) && (mp.tlencount < 10000);
+  }
   if (mp.opt.batch_mode) {
-    findFragmentLength = (mp.opt.fld == 0) && (mp.tlencounts[id] < 10000);
+    if (mp.opt.long_read) {
+      findFragmentLength = (mp.tlencount < 1000000); 
+    } else {
+      findFragmentLength = (mp.opt.fld == 0) && (mp.tlencount < 10000);
+    }
   }
 
   int flengoal = 0;
   flens.clear();
+  unmapped_list.clear(); 
+  flens_lr.clear();
+  flens_lr_c.clear();
   if (findFragmentLength) {
-    flengoal = (10000 - mp.tlencount);
+    if (mp.opt.long_read) {
+      flengoal = (1000000 - mp.tlencount); 
+    } else {
+      flengoal = (10000 - mp.tlencount);
+    }
     if (flengoal <= 0) {
       findFragmentLength = false;
       flengoal = 0;
     } else {
-      flens.resize(tc.flens.size(), 0);
+      if (mp.opt.long_read) {
+        flens_lr.resize(tc.flens_lr.size(), 0); 
+        flens_lr_c.resize(tc.flens_lr_c.size(), 0); 
+      } else {
+        flens.resize(tc.flens.size(), 0);
+      }
     }
   }
 
@@ -947,13 +1019,27 @@ void ReadProcessor::processBuffer() {
     u = Roaring();
 
     // process read
-    index.match(s1, l1, v1, !paired);
+    
+    bool novel = false;
+    double unmapped_r=0; 
+    if (mp.opt.long_read) {
+      unmapped_r = index.match_long(s1, l1, v1, !paired);
+      std::cerr << unmapped_r << "," << std::endl; 
+      novel = (unmapped_r > mp.opt.threshold*l1);
+    } else {
+      index.match(s1, l1, v1, !paired);
+    }
     if (paired) {
       index.match(s2, l2, v2, !paired);
     }
 
     // collect the target information
-    int r = tc.intersectKmers(v1, v2, !paired, u);
+    int r = 0; 
+    if (mp.opt.long_read) {
+    	r = tc.modeKmers(v1, v2, !paired, u);
+    } else {
+      r = tc.intersectKmers(v1, v2, !paired, u);
+    }
     // Mask out off-listed kmers
     u &= index.onlist_sequences;
 
@@ -963,128 +1049,167 @@ void ReadProcessor::processBuffer() {
         exit(1);
         //searchFusion(index,mp.opt,tc,mp,ec,names[i-1].first,s1,v1,names[i].first,s2,v2,paired);
       }
+      novel = true; 
+    }
+
+    if (mp.opt.long_read && (r == -1 || u.isEmpty()) && mp.opt.unmapped) {
+      std::stringstream ss; 
+      std::string s(s1);
+      s = "@unmapped\n"+s;
+      ss << s; 
+      mp.outputNovel(ss);
     }
 
     /* --  possibly modify the pseudoalignment  -- */
+    if (!novel || !mp.opt.long_read) {
+	    // If we have paired end reads where one end maps or single end reads, check if some transcsripts
+	    // are not compatible with the mean fragment length
+	    if (!mp.opt.single_overhang && !u.isEmpty() && (!paired || v1.empty() || v2.empty()) && tc.has_mean_fl) {
+	      vtmp = Roaring();
+	      // inspect the positions
+	      int fl = (int) tc.get_mean_frag_len();
+	      int p = -1;
+	      const_UnitigMap<Node> um;
+	      Kmer km;
+	      
+	      if (!v1.empty()) {
+	        auto res = findFirstMappingKmer(v1);
+	        um = res.first;
+	        p = res.second;
+	        km = um.getMappedHead();
+	      }
+	      if (!v2.empty()) {
+	        auto res = findFirstMappingKmer(v2);
+	        um = res.first;
+	        p = res.second;
+	        km = um.getMappedHead();
+	      }
+	      
+	      // for each transcript in the pseudoalignment
+	      for (auto tr : u) {
+	        
+	        auto x = index.findPosition(tr, km, um, p);
+	        // if the fragment is within bounds for this transcript, keep it
+	        if (x.second && x.first + fl <= (int)index.target_lens_[tr]) {
+	          vtmp.add(tr);
+	        } else {
+	          //pass
+	        }
+	        if (!x.second && x.first - fl >= 0) {
+	          vtmp.add(tr);
+	        } else {
+	          //pass
+	        }
+	      }
+	      
+	      if (vtmp.cardinality() < u.cardinality()) {
+	        u = vtmp; // copy
+	      }
+	    }
 
-    // If we have paired end reads where one end maps or single end reads, check if some transcsripts
-    // are not compatible with the mean fragment length
-    if (!mp.opt.single_overhang && !u.isEmpty() && (!paired || v1.empty() || v2.empty()) && tc.has_mean_fl) {
-      vtmp = Roaring();
-      // inspect the positions
-      int fl = (int) tc.get_mean_frag_len();
-      int p = -1;
-      const_UnitigMap<Node> um;
-      Kmer km;
+	    if (mp.opt.strand_specific && !u.isEmpty()) {
+	      doStrandSpecificity(u, mp.opt.strand, v1, v2);
+	    }
 
-      if (!v1.empty()) {
-        auto res = findFirstMappingKmer(v1);
-        um = res.first;
-        p = res.second;
-        km = um.getMappedHead();
-      }
-      if (!v2.empty()) {
-        auto res = findFirstMappingKmer(v2);
-        um = res.first;
-        p = res.second;
-        km = um.getMappedHead();
-      }
+	    // find the ec
+	    if (!u.isEmpty()) {
+	      std::lock_guard<std::mutex> lock(mp.transfer_locks[local_id]);
+	      
+	      // count the pseudoalignment
+	      auto elem = index.ecmapinv.find(u);
+	      if (elem == index.ecmapinv.end()) {
+	        // something we haven't seen before
+	        newEcs.push_back(u);
+	      } else if (elem->second >= counts.size()) { // handle race condition (if counts isn't updated yet)
+	        newEcs.push_back(u);
+	      } else {
+	        // add to count vector
+	        ++counts[elem->second];
+	      }
+	      
+	      /* -- collect extra information -- */
+	      // collect bias info
+	      if (findBias && !u.isEmpty() && biasgoal > 0) {
+	        // collect sequence specific bias info
+	        
+	        if (tc.countBias(s1, (paired) ? s2 : nullptr, v1, v2, paired, bias5)) {
+	          biasgoal--;
+	        }
+	      }
+	      
+	      // collect fragment length info
+	      if (!mp.opt.long_read && findFragmentLength && flengoal > 0 && paired && u.cardinality() == 1 && !v1.empty() && !v2.empty()) {
+	        // try to map the reads
+	        int tl = index.mapPair(s1, l1, s2, l2);
+	        if (0 < tl && tl < flens.size()) {
+	          flens[tl]++;
+	          flengoal--;
+	        }
+	      }
+	      
+	      if (mp.opt.long_read) {
+	        if (findFragmentLength && flengoal > 0 && u.cardinality() == 1 && !v1.empty()) {
+	          for ( auto tr : u) {
+	            flens_lr[tr] += l1;
+	            flens_lr_c[tr]++;
+	            flengoal--;
+	          }    			
+	        }
+	        if (findFragmentLength && mp.opt.unmapped)
+	        {
+	          unmapped_list.push_back(unmapped_r); 	    
+	        }
+	      }
+	    }
+	    // pseudobam     
+	    if (mp.opt.pseudobam) {
+	      PseudoAlignmentInfo info;
+	      info.id = (paired) ? (i/2) : i; // read id
+	      info.paired = paired;
+	      if (!u.isEmpty()) {
+	        info.r1empty = v1.empty();
+	        info.r2empty = v2.empty();
+	        const_UnitigMap<Node> um;
+	        info.k1pos = -1;
+	        info.k2pos = -1;
+	        if (!info.r1empty) {
+	          auto res = findFirstMappingKmer(v1);
+	          info.k1pos = res.second;
+	        }
+	        if (!info.r2empty) {
+	          auto res = findFirstMappingKmer(v2);
+	          info.k1pos = res.second;
+	        }
+	        
+	        info.ec = u;
+	      }
+	      pseudobatch.aln.push_back(std::move(info));
+	    }
 
-      // for each transcript in the pseudoalignment
-      for (auto tr : u) {
-
-        auto x = index.findPosition(tr, km, um, p);
-        // if the fragment is within bounds for this transcript, keep it
-        if (x.second && x.first + fl <= (int)index.target_lens_[tr]) {
-          vtmp.add(tr);
-        } else {
-          //pass
-        }
-        if (!x.second && x.first - fl >= 0) {
-          vtmp.add(tr);
-        } else {
-          //pass
-        }
-      }
-
-      if (vtmp.cardinality() < u.cardinality()) {
-        u = vtmp; // copy
-      }
-    }
-
-    if (mp.opt.strand_specific && !u.isEmpty()) {
-      doStrandSpecificity(u, mp.opt.strand, v1, v2);
-    }
-
-    // find the ec
-    if (!u.isEmpty()) {
-      std::lock_guard<std::mutex> lock(mp.transfer_locks[local_id]);
-
-      // count the pseudoalignment
-      auto elem = index.ecmapinv.find(u);
-      if (elem == index.ecmapinv.end()) {
-        // something we haven't seen before
-        newEcs.push_back(u);
-      } else if (elem->second >= counts.size()) { // handle race condition (if counts isn't updated yet)
-        newEcs.push_back(u);
+    } else { // now address reads that are considered novel and need to be written to novel fastq and processed later. 
+      std::stringstream ss; 
+      if (u.isEmpty()) {
+        std::string s(s1);
+        s = "@novel_disjointIntersect\n"+s;
+        ss << s; 
+        mp.outputNovel(ss);
       } else {
-        // add to count vector
-        ++counts[elem->second];
-      }
-
-      /* -- collect extra information -- */
-      // collect bias info
-      if (findBias && !u.isEmpty() && biasgoal > 0) {
-        // collect sequence specific bias info
-
-        if (tc.countBias(s1, (paired) ? s2 : nullptr, v1, v2, paired, bias5)) {
-          biasgoal--;
-        }
-      }
-
-      // collect fragment length info
-      if (findFragmentLength && flengoal > 0 && paired && u.cardinality() == 1 && !v1.empty() && !v2.empty()) {
-        // try to map the reads
-        int tl = index.mapPair(s1, l1, s2, l2);
-        if (0 < tl && tl < flens.size()) {
-          flens[tl]++;
-          flengoal--;
-        }
+        std::string s(s1);
+        s = "@novel_tooManyEmptyKmers\n"+s;
+        ss << s; 
+        mp.outputNovel(ss);
       }
     }
-
-    // pseudobam
-
-    if (mp.opt.pseudobam) {
-      PseudoAlignmentInfo info;
-      info.id = (paired) ? (i/2) : i; // read id
-      info.paired = paired;
-      if (!u.isEmpty()) {
-        info.r1empty = v1.empty();
-        info.r2empty = v2.empty();
-        const_UnitigMap<Node> um;
-        info.k1pos = -1;
-        info.k2pos = -1;
-        if (!info.r1empty) {
-          auto res = findFirstMappingKmer(v1);
-          info.k1pos = res.second;
-        }
-        if (!info.r2empty) {
-          auto res = findFirstMappingKmer(v2);
-          info.k1pos = res.second;
-        }
-
-        info.ec = u;
-      }
-      pseudobatch.aln.push_back(std::move(info));
-    }
-  }
+   }
 }
 
 void ReadProcessor::clear() {
   numreads=0;
   memset(buffer,0,bufsize);
   newEcs.clear();
+  flens_lr.clear();
+  flens_lr_c.clear(); 
+  unmapped_list.clear();
   counts.clear();
   counts.resize(tc.counts.size(),0);
   ec_umi.clear();
@@ -1100,6 +1225,7 @@ BUSProcessor::BUSProcessor(/*const*/ KmerIndex& index, const ProgramOptions& opt
    buffer = new char[bufsize];
    seqs.reserve(bufsize/50);
    newEcs.reserve(1000);
+   if (opt.unmapped) unmapped_list.reserve(seqs.size()); 
    bv.reserve(1000);
    counts.reserve((int) (tc.counts.size() * 1.25));
    memset(&bc_len[0],0,sizeof(bc_len));
@@ -1124,7 +1250,10 @@ BUSProcessor::BUSProcessor(BUSProcessor && o) :
   quals(std::move(o.quals)),
   flags(std::move(o.flags)),
   newEcs(std::move(o.newEcs)),
+  unmapped_list(std::move(o.unmapped_list)), 
   flens(std::move(o.flens)),
+  flens_lr(std::move(o.flens_lr)),
+  flens_lr_c(std::move(o.flens_lr_c)),
   bias5(std::move(o.bias5)),
   bv(std::move(o.bv)),
   batchSR(std::move(o.batchSR)),
@@ -1207,7 +1336,7 @@ void BUSProcessor::operator()() {
     // update the results, MP acquires the lock
     std::vector<std::pair<Roaring, std::string>> ec_umi;
     std::vector<std::pair<Roaring, std::string>> new_ec_umi;
-    mp.update(counts, newEcs, ec_umi, new_ec_umi, seqs.size() / mp.opt.busOptions.nfiles , flens, bias5, pseudobatch, bv, std::move(newB), &bc_len[0], &umi_len[0], id, local_id);
+    mp.update(counts, newEcs, ec_umi, new_ec_umi, seqs.size() / mp.opt.busOptions.nfiles , flens, unmapped_list, flens_lr, flens_lr_c, bias5, pseudobatch, bv, std::move(newB), &bc_len[0], &umi_len[0], id, local_id);
     clear();
     if (mp.opt.max_num_reads != 0 && mp.numreads >= mp.opt.max_num_reads) {
       return;
@@ -1236,17 +1365,39 @@ void BUSProcessor::processBuffer() {
     tcount = mp.tlencounts[id];
   }
   bool findFragmentLength = tcount < 10000 && busopt.paired;
+  if (busopt.long_read) {
+    findFragmentLength = tcount < 1000000; 
+  }
+  if (mp.opt.batch_mode) {
+    if (busopt.long_read) {
+      findFragmentLength = (mp.tlencount < 1000000); 
+    }
+  }
+
   int flengoal = 0;
   flens.clear();
+  //unmapped_list.clear();
+  flens_lr.clear();
+  flens_lr_c.clear();
   if (findFragmentLength) {
-    flengoal = (10000 - tcount);
+    if (busopt.long_read) {
+      flengoal = (1000000 - tcount); 
+    } else {
+      flengoal = (10000 - tcount);
+    }
     if (flengoal <= 0) {
       findFragmentLength = false;
       flengoal = 0;
     } else {
-      flens.resize(tc.flens.size(), 0);
+      if (busopt.long_read) {
+        flens_lr.resize(tc.flens_lr.size(), 0); 
+        flens_lr_c.resize(tc.flens_lr_c.size(), 0); 
+      } else {
+        flens.resize(tc.flens.size(), 0);
+      }
     }
   }
+
 
   char buffer[100];
   memset(buffer, 0, 100);
@@ -1448,7 +1599,16 @@ void BUSProcessor::processBuffer() {
 
     bool match_partial = !busopt.paired && !index.dfk_onlist && !busopt.aa;
 
-    index.match(seq, seqlen, v, match_partial, busopt.aa);
+    bool novel = false; 
+    double unmapped_r = 0; 
+    if (mp.opt.long_read) {
+       unmapped_r = index.match_long(seq, seqlen, v, match_partial, busopt.aa);
+       //std::cerr << unmapped_r << "," << std::endl;
+       unmapped_list.push_back(unmapped_r);
+       novel = (unmapped_r > mp.opt.threshold*seqlen);
+    } else {
+       index.match(seq, seqlen, v, match_partial, busopt.aa);
+    }
 
     // process 2nd read
     if (busopt.paired) {
@@ -1457,6 +1617,7 @@ void BUSProcessor::processBuffer() {
     }
 
     // process frames for commafree (to do: extend to paired-end reads)
+    int r = 0; 
     if (busopt.aa) {
       // initiate equivalence classes
       std::vector<std::pair<const_UnitigMap<Node>, int>> v3, v4, v5, v6, v7;
@@ -1497,73 +1658,115 @@ void BUSProcessor::processBuffer() {
 
       // intersect set of equivalence classes for each frame
       // NOTE: intersectKmers is called again further up. to-do: Do I need to modify that too?
-      int r = tc.intersectKmersCFC(v, v3, v4, v5, v6, v7, u);
+      r = tc.intersectKmersCFC(v, v3, v4, v5, v6, v7, u);
     }
     else {
       // collect the target information
-      int r = tc.intersectKmers(v, v2, !busopt.paired, u);
+      if (mp.opt.long_read) {
+      	r = tc.modeKmers(v, v2, !busopt.paired, u);
+      } else {
+        r = tc.intersectKmers(v, v2, !busopt.paired, u);
+      }
     }
-    if (!u.isEmpty()) {
-      if (index.dfk_onlist) { // In case we want to not intersect D-list targets
-        auto usize = u.cardinality();
-        u &= index.onlist_sequences;
-        if (u.cardinality() != usize && !(usize > 0 && u.cardinality() == 0)) {
-          // Add if a D-list elem exists but not if ALL elems are D-listed
-          u.add(index.onlist_sequences.cardinality());
+
+    if (mp.opt.long_read && (r == -1 || u.isEmpty()) && mp.opt.unmapped) {
+      std::stringstream ss; 
+      std::string s(seq);
+      s = "@unmapped\n"+s;
+      ss << s; 
+      mp.outputNovel(ss);
+    }
+
+    if (!novel || !mp.opt.long_read) {
+      if (!u.isEmpty()) {
+        if (index.dfk_onlist) { // In case we want to not intersect D-list targets
+          auto usize = u.cardinality();
+          u &= index.onlist_sequences;
+          if (u.cardinality() != usize && !(usize > 0 && u.cardinality() == 0)) {
+            // Add if a D-list elem exists but not if ALL elems are D-listed
+            u.add(index.onlist_sequences.cardinality());
+          }
+        } else { // Normal/standard workflow:
+          // Mask out off-listed kmers
+          u &= index.onlist_sequences;
         }
-      } else { // Normal/standard workflow:
-        // Mask out off-listed kmers
-        u &= index.onlist_sequences;
       }
-    }
-
-    if (doStrandSpecificityIfPossible && mp.opt.strand_specific && !u.isEmpty()) { // Strand-specificity
-      doStrandSpecificity(u, mp.opt.strand, v, v2);
-    }
-
-    // find the ec
-    if (!u.isEmpty()) {
-      BUSData b;
-      uint32_t f = 0;
-      b.flags = 0;
-      b.barcode = stringToBinary(bc, blen, f);
-      b.flags |= f;
-      b.UMI = check_tag_sequence || bulk_like ? umi_binary : stringToBinary(umi, ulen, f);
-      b.flags |= (f) << 8;
-      b.count = 1;
-      if (num) {
-        b.flags = (uint32_t) flags[i / jmax];
+      
+      if (doStrandSpecificityIfPossible && mp.opt.strand_specific && !u.isEmpty()) { // Strand-specificity
+        doStrandSpecificity(u, mp.opt.strand, v, v2);
       }
-
-      if (busopt.paired && getFragLenIfPaired) {
-        if (findFragmentLength && flengoal > 0 && u.cardinality() == 1 && !v.empty() && !v2.empty()) {
-          // try to map the reads
-          int tl = index.mapPair(seq, seqlen, seq2, seqlen2);
-          if (0 < tl && tl < flens.size()) {
-            flens[tl]++;
-            flengoal--;
+      
+      // find the ec
+      if (!u.isEmpty()) {
+        BUSData b;
+        uint32_t f = 0;
+        b.flags = 0;
+        b.barcode = stringToBinary(bc, blen, f);
+        b.flags |= f;
+        b.UMI = check_tag_sequence || bulk_like ? umi_binary : stringToBinary(umi, ulen, f);
+        b.flags |= (f) << 8;
+        b.count = 1;
+        if (num) {
+          b.flags = (uint32_t) flags[i / jmax];
+        }
+        
+        if (busopt.paired && getFragLenIfPaired && !mp.opt.long_read) {
+          if (findFragmentLength && flengoal > 0 && u.cardinality() == 1 && !v.empty() && !v2.empty()) {
+            // try to map the reads
+            int tl = index.mapPair(seq, seqlen, seq2, seqlen2);
+            if (0 < tl && tl < flens.size()) {
+              flens[tl]++;
+              flengoal--;
+            }
           }
         }
-      }
-
-      // count the pseudoalignment
-      std::lock_guard<std::mutex> lock(mp.transfer_locks[local_id]);
-      auto elem = index.ecmapinv.find(u);
-      if (elem == index.ecmapinv.end()) {
-        // something we haven't seen before
-        //newEcs.push_back(u); // don't store newEcs (it's redundant)
-        newB.push_back({b, u});
-      } /*else if (elem->second >= counts.size()) {
-          newEcs.push_back(u);
+        
+        if (mp.opt.long_read) {
+          if (findFragmentLength && flengoal > 0 && u.cardinality() == 1 && !v.empty()) {
+            for ( auto tr : u) {
+              flens_lr[tr] += seqlen;
+              flens_lr_c[tr]++;
+              flengoal--;
+            }    	
+          }
+          if(findFragmentLength && mp.opt.unmapped) {
+            unmapped_list.push_back(unmapped_r); 
+          }
+        }
+        
+        // count the pseudoalignment
+        std::lock_guard<std::mutex> lock(mp.transfer_locks[local_id]);
+        auto elem = index.ecmapinv.find(u);
+        if (elem == index.ecmapinv.end()) {
+          // something we haven't seen before
+          //newEcs.push_back(u); // don't store newEcs (it's redundant)
           newB.push_back({b, u});
-      } */ else {
-        // add to count vector
-        //++counts[elem->second]; // don't store counts; we have BUS records that we can count up
-        // push back BUS record
-        b.ec = elem->second;
-        bv.push_back(b);
+        } /*else if (elem->second >= counts.size()) {
+ newEcs.push_back(u);
+ newB.push_back({b, u});
+        } */ else {
+          // add to count vector
+          //++counts[elem->second]; // don't store counts; we have BUS records that we can count up
+          // push back BUS record
+          b.ec = elem->second;
+          bv.push_back(b);
+        }
       }
-    }
+    } else {
+      // now address reads that are considered novel and need to be written to novel fastq and processed later.
+      std::stringstream ss;
+      if (u.isEmpty()) {
+        std::string s(seq);
+        s = "@novel_disjointIntersect\n"+s;
+        ss << s;
+        mp.outputNovel(ss);
+      } else {
+        std::string s(seq);
+        s = "@novel_tooManyEmptyKmers\n"+s;
+        ss << s; 
+        mp.outputNovel(ss);
+      }
+    } 
 
     if (mp.opt.pseudobam) {
       PseudoAlignmentInfo info;
@@ -1594,6 +1797,7 @@ void BUSProcessor::clear() {
   numreads=0;
   memset(buffer,0,bufsize);
   newEcs.clear();
+  unmapped_list.clear(); 
   counts.clear();
   //counts.resize(tc.counts.size(), 0);
   bv.clear();

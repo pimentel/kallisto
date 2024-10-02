@@ -1,7 +1,7 @@
 #ifndef KALLISTO_COMMON_H
 #define KALLISTO_COMMON_H
 
-#define KALLISTO_VERSION "0.50.1"
+#define KALLISTO_VERSION "0.51.0"
 
 // NOTE: MAKE SURE THIS FILE GETS INCLUDED FIRST IN ALL OTHER FILES AND BEFORE ANY EXTERNAL LIBRARIES
 
@@ -51,6 +51,10 @@ struct BUSOptions {
   std::vector<BUSOptionSubstr> seq;
 
   bool paired;
+  bool long_read; 
+  bool unmapped;
+  double error_rate;
+  double threshold; 
   bool aa;
 
   int getBCLength() const {
@@ -99,6 +103,8 @@ struct ProgramOptions {
   std::string output;
   int skip;
   size_t seed;
+  double error_rate; 
+  double threshold;
   double fld;
   double sd;
   int min_range;
@@ -119,6 +125,8 @@ struct ProgramOptions {
   bool plaintext;
   bool write_index;
   bool single_end;
+  bool long_read;
+  bool unmapped;
   bool strand_specific;
   bool peek; // only used for H5Dump
   bool bias;
@@ -140,6 +148,7 @@ struct ProgramOptions {
   std::string chromFile;
   std::string bedFile;
   std::string technology;
+  std::string platform; 
   std::string tagsequence;
   std::string tccFile;
   std::string ecFile;
@@ -158,6 +167,8 @@ ProgramOptions() :
   iterations(500),
   skip(1),
   seed(42),
+  error_rate(0.0),
+  threshold(0.8),
   fld(0.0),
   sd(0.0),
   min_range(1),
@@ -169,11 +180,13 @@ ProgramOptions() :
   matrix_to_directories(false),
   batch_mode(false),
   bus_mode(false),
+  unmapped(false),
   bam(false),
   num(false),
   plaintext(false),
   write_index(false),
   single_end(false),
+  long_read(false),
   strand_specific(false),
   peek(false),
   bias(false),

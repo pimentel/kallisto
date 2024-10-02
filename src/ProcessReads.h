@@ -196,9 +196,18 @@ public:
       transfer_locks.swap(mutexes);
 
       if (opt.batch_mode) { // Set up recording of lengths individually for each batch
-        tlencounts.assign(opt.batch_ids.size(), 0);
-        batchFlens.assign(opt.batch_ids.size(), std::vector<uint32_t>(1000,0));
-      }
+        if (opt.long_read) {
+          tlencounts.assign(opt.batch_ids.size(), 0);
+          //std::cerr << "Is this assignment of batchFlens space causing abort?" << std::endl; std::cerr.flush();
+          batchFlens_lr.assign(opt.batch_ids.size(), std::vector<uint32_t>(index.target_lens_.size(),0));
+          batchFlens_lr_c.assign(opt.batch_ids.size(), std::vector<uint32_t>(index.target_lens_.size(),0));
+          //std::cerr << "Passed assignment of batchFlens" << std::endl; std::cerr.flush();
+          batchUnmapped_list.assign(opt.batch_ids.size(), std::vector<double>(3000000/opt.batch_ids.size(),0));
+        } else {
+          tlencounts.assign(opt.batch_ids.size(), 0);
+          batchFlens.assign(opt.batch_ids.size(), std::vector<uint32_t>(1000,0));
+        }
+      } 
       if (opt.batch_ids.size() > 0) {
         std::unordered_map<std::string,int> batch_map;
         batch_id_mapping.resize(opt.batch_ids.size());
@@ -216,6 +225,9 @@ public:
       if (opt.fusion) {
         ofusion.open(opt.output + "/fusion.txt");
         ofusion << "TYPE\tNAME1\tSEQ1\tKPOS1\tNAME2\tSEQ2\tKPOS2\tINFO\tPOS1\tPOS2\n";
+      }
+      if (opt.long_read) {
+        ofusion.open(opt.output + "/novel.fastq");
       }
       if (opt.pseudobam) {
         pseudobatchf_out.open(opt.output + "/pseudoaln.bin", std::ios::out | std::ios::binary);
@@ -293,7 +305,10 @@ public:
   std::atomic<int> tlencount;
   std::vector<int> tlencounts;
   std::atomic<int> biasCount;
+  std::vector<std::vector<double>> batchUnmapped_list; 
   std::vector<std::vector<uint32_t>> batchFlens;
+  std::vector<std::vector<uint32_t>> batchFlens_lr;
+  std::vector<std::vector<uint32_t>> batchFlens_lr_c;
   std::vector<std::vector<int32_t>> tmp_bc;
   const int maxBiasCount;
   u_map_<Roaring, uint32_t, RoaringHasher> newECcount;
@@ -302,12 +317,14 @@ public:
   std::vector<int> batch_id_mapping; // minimal perfect mapping of batch ID
 
   std::ofstream ofusion;
+  std::ofstream onovel;
   std::ofstream pseudobatchf_out;
   std::ofstream busf_out;
   std::ifstream pseudobatchf_in;
   std::vector<PseudoAlignmentBatch> pseudobatch_stragglers;
   int last_pseudobatch_id;
   void outputFusion(const std::stringstream &o);
+  void outputNovel(const std::stringstream &o);
   void processReads();
   #ifndef NO_HTSLIB
   htsFile *bamfp;
@@ -318,7 +335,7 @@ public:
   void writeSortedPseudobam(const std::vector<std::vector<bam1_t>> &bvv);
   #endif
   std::vector<uint64_t> breakpoints;
-  void update(const std::vector<uint32_t>& c, const std::vector<Roaring>& newEcs, std::vector<std::pair<Roaring, std::string>>& ec_umi, std::vector<std::pair<Roaring, std::string>> &new_ec_umi, int n, std::vector<int>& flens, std::vector<int> &bias, const PseudoAlignmentBatch& pseudobatch, std::vector<BUSData> &bv, std::vector<std::pair<BUSData, Roaring>> newB, int *bc_len, int *umi_len,   int id = -1, int local_id = -1);
+  void update(const std::vector<uint32_t>& c, const std::vector<Roaring>& newEcs, std::vector<std::pair<Roaring, std::string>>& ec_umi, std::vector<std::pair<Roaring, std::string>> &new_ec_umi, int n, std::vector<int>& flens, std::vector<double>& unmapped_list, std::vector<int>& flens_lr, std::vector<int>& flens_lr_c, std::vector<int> &bias, const PseudoAlignmentBatch& pseudobatch, std::vector<BUSData> &bv, std::vector<std::pair<BUSData, Roaring>> newB, int *bc_len, int *umi_len,   int id = -1, int local_id = -1);
 };
 
 class ReadProcessor {
@@ -347,7 +364,10 @@ public:
   std::vector<uint32_t> flags;
   std::vector<std::string> umis;
   std::vector<Roaring> newEcs;
+  std::vector<double> unmapped_list; 
   std::vector<int> flens;
+  std::vector<int> flens_lr;
+  std::vector<int> flens_lr_c;
   std::vector<int> bias5;
 
   std::vector<uint32_t> counts;
@@ -387,7 +407,10 @@ public:
   std::vector<uint32_t> flags;
 
   std::vector<Roaring> newEcs;
+  std::vector<double> unmapped_list; 
   std::vector<int> flens;
+  std::vector<int> flens_lr;
+  std::vector<int> flens_lr_c;
   std::vector<int> bias5;
   std::vector<uint32_t> counts;
   std::vector<BUSData> bv;

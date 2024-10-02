@@ -82,6 +82,7 @@ struct KmerIndex {
   ~KmerIndex() {}
 
   std::pair<size_t,size_t> getECInfo() const; // Get max EC size encountered and second element is the number of nodes in which an EC is empty (b/c it was discarded)
+  double match_long(const char *s, int l, std::vector<std::pair<const_UnitigMap<Node>, int>>& v, bool partial = false, bool cfc = false) const;
   void match(const char *s, int l, std::vector<std::pair<const_UnitigMap<Node>, int>>& v, bool partial = false, bool cfc = false) const;
 
 //  bool matchEnd(const char *s, int l, std::vector<std::pair<int, int>>& v, int p) const;
