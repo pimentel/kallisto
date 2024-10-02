@@ -32,7 +32,7 @@ class MasterProcessor;
 int64_t ProcessReads(MasterProcessor& MP, const  ProgramOptions& opt);
 int64_t ProcessBatchReads(MasterProcessor& MP, const ProgramOptions& opt);
 int64_t ProcessBUSReads(MasterProcessor& MP, const ProgramOptions& opt);
-int findFirstMappingKmer(const std::vector<std::pair<UnitigMap<Node>&, int>> &v, UnitigMap<Node>& um);
+std::pair<const_UnitigMap<Node>, int> findFirstMappingKmer(const std::vector<std::pair<const_UnitigMap<Node>, int>> &v);
 
 class SequenceReader {
 public:

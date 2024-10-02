@@ -159,8 +159,15 @@ int MinCollector::modeKmers(std::vector<std::pair<const_UnitigMap<Node>, int32_t
 
 int MinCollector::intersectKmers(std::vector<std::pair<const_UnitigMap<Node>, int32_t>>& v1,
                           std::vector<std::pair<const_UnitigMap<Node>, int32_t>>& v2, bool nonpaired, Roaring& r) const {
-  Roaring u1 = intersectECs(v1);
-  Roaring u2 = intersectECs(v2);
+  Roaring u1, u2;
+  if (!index.do_union) {
+    u1 = intersectECs(v1);
+    u2 = intersectECs(v2);
+  } else {
+    u1 = unionECs(v1);
+    u2 = unionECs(v2);
+  }
+
 
   if (u1.isEmpty() && u2.isEmpty()) {
     return -1;
@@ -183,12 +190,30 @@ int MinCollector::intersectKmers(std::vector<std::pair<const_UnitigMap<Node>, in
     if (index.dfk_onlist) { // In case we want to not intersect D-list targets
       includeDList(u1, u2, index.onlist_sequences);
     }
+    // Begin Shading
+    if (index.use_shade) u1 = u1 - index.shade_sequences;
+    if (index.use_shade) u2 = u2 - index.shade_sequences;
+    // End Shading
     r = u1 & u2;
   }
 
   if (r.isEmpty()) {
     return -1;
   }
+  // Begin Shading
+  if (index.use_shade) {
+    // Take the union of the shades
+    u1 = unionECs(v1);
+    u2 = unionECs(v2);
+    Roaring r_shade = (u1 | u2) & index.shade_sequences;
+    Roaring r_shade_final;
+    for (auto shade : r_shade) { // Make sure the shades correspond to the targets in the intersection
+      auto color = index.shadeToColorTranscriptMap[shade];
+      if (r.contains(color)) r_shade_final.add(shade);
+    }
+    r |= r_shade_final; // Add the shades to the equivalence class
+  }
+  // End Shading
   return 1;
 }
 
@@ -414,15 +439,21 @@ Roaring MinCollector::intersectECs(std::vector<std::pair<const_UnitigMap<Node>, 
 
   
   r = v[0].first.getData()->ec[v[0].first.dist].getIndices();
+  // Begin Shading
+  if (index.use_shade) r = r - index.shade_sequences;
+  // End Shading
   bool found_nonempty = !r.isEmpty();
   Roaring lastEC = r;
   Roaring ec;
-
+  
   for (int i = 1; i < v.size(); i++) {
 
     // Find a non-empty EC before we start taking the intersection
     if (!found_nonempty) {
       r = v[i].first.getData()->ec[v[i].first.dist].getIndices();
+      // Begin Shading
+      if (index.use_shade) r = r - index.shade_sequences;
+      // End Shading
       found_nonempty = !r.isEmpty();
     }
 
@@ -430,6 +461,9 @@ Roaring MinCollector::intersectECs(std::vector<std::pair<const_UnitigMap<Node>, 
         !(v[i].first.getData()->ec[v[i].first.dist] == v[i-1].first.getData()->ec[v[i-1].first.dist])) {
 
       ec = v[i].first.getData()->ec[v[i].first.dist].getIndices();
+      // Begin Shading
+      if (index.use_shade) ec = ec - index.shade_sequences;
+      // End Shading
 
       // Don't intersect empty EC (because of thresholding)
       if (!(ec == lastEC) && !ec.isEmpty()) {
@@ -457,7 +491,57 @@ Roaring MinCollector::intersectECs(std::vector<std::pair<const_UnitigMap<Node>, 
   if ((maxpos-minpos + k) < min_range) {
     return {};
   }
+  
+  return r;
+}
 
+Roaring MinCollector::unionECs(std::vector<std::pair<const_UnitigMap<Node>, int32_t>>& v) const {
+  Roaring r;
+  if (v.empty()) {
+    return r;
+  }
+  sort(v.begin(), v.end(), [&](const std::pair<const_UnitigMap<Node>, int>& a, const std::pair<const_UnitigMap<Node>, int>& b)
+  {
+    if (a.first.isSameReferenceUnitig(b.first) &&
+        a.first.getData()->ec[a.first.dist] == b.first.getData()->ec[b.first.dist]) {
+      return a.second < b.second;
+    } else {
+      return a.first.getData()->id < b.first.getData()->id;
+    }
+  }); // sort by contig, and then first position
+  
+  r = v[0].first.getData()->ec[v[0].first.dist].getIndices();
+  bool found_nonempty = !r.isEmpty();
+  Roaring lastEC = r;
+  Roaring ec;
+  
+  for (int i = 1; i < v.size(); i++) {
+    // Find a non-empty EC before we start taking the intersection
+    if (!found_nonempty) {
+      r = v[i].first.getData()->ec[v[i].first.dist].getIndices();
+      found_nonempty = !r.isEmpty();
+    }
+
+    if (!v[i].first.isSameReferenceUnitig(v[i-1].first) ||
+        !(v[i].first.getData()->ec[v[i].first.dist] == v[i-1].first.getData()->ec[v[i-1].first.dist])) {
+        ec = v[i].first.getData()->ec[v[i].first.dist].getIndices();
+      r |= ec;
+    }
+  }
+  
+  // find the range of support
+  int minpos = std::numeric_limits<int>::max();
+  int maxpos = 0;
+
+  for (auto& x : v) {
+    minpos = std::min(minpos, x.second);
+    maxpos = std::max(maxpos, x.second);
+  }
+
+  if ((maxpos-minpos + k) < min_range) {
+    return {};
+  }
+  
   return r;
 }
 

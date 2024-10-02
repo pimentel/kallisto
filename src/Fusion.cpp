@@ -1,6 +1,12 @@
 #include <sstream>
 #include <set>
 
+#include "ProcessReads.h"
+#include "Fusion.h"
+
+
+typedef std::vector<std::pair<const_UnitigMap<Node>, int32_t> > MappedVector;
+
 /** -- fusion functions -- **/
 
 /**
@@ -27,26 +33,35 @@ is either FW or RE depending on whether the read aligns to the forward or revers
 **/
 
 void printTranscripts(const KmerIndex& index, std::stringstream& o, const std::string s,
-  const std::vector<std::pair<KmerEntry,int>>& v, const std::vector<int> u) {
+  const MappedVector& v, const Roaring& u) {
 
-  /*
+  
   Kmer km;
   KmerEntry val;
   int p;
+  const_UnitigMap<Node> um;
 
   // find first mapping k-mer
   if (!v.empty()) {
-    p = findFirstMappingKmer(v,val);
-    km = Kmer((s.c_str()+p));
+    Roaring vtmp;
+    auto res = findFirstMappingKmer(v);
+    um = res.first;
+    p = res.second;
+    km = um.getMappedHead();
+    //km = Kmer((s.c_str()+p));
   }
   
 
-  for (int i = 0; i < u.size(); i++) {
-    int tr = u[i];
+  int i = -1;
+  for (const auto &tr : u) {
+    i++;
+  /*for (int i = 0; i < u.size(); i++) {
+    int tr = u[i];*/
     if (i > 0) {
       o << ";";
     }
-    std::pair<int, bool> xp = index.findPosition(tr, km, val, p);
+
+    std::pair<int, bool> xp = index.findPosition(tr, km, um, p);
     o << "(" << index.target_names_[tr] << "," << xp.first << ",";
     if (xp.second) {
       o << "FW)";
@@ -54,132 +69,61 @@ void printTranscripts(const KmerIndex& index, std::stringstream& o, const std::s
       o << "RC)";
     }
   }
-  */
+  
 }
 
-std::vector<int> simpleIntersect(const KmerIndex& index, const std::vector<std::pair<KmerEntry,int>>& v) {
-  return {};
-  /*
+Roaring simpleIntersect(const KmerIndex& index, const MappedVector& v) {
+  
   if (v.empty()) {
     return {};
   }
-  int ec = index.dbGraph.ecs[v[0].first.contig];
-  int lastEC = ec;
-  std::vector<int> u = index.ecmap[ec];
+
+  // get the ec from the debruijn graph
+  const auto um = v[0].first;
+  
+  Roaring ec = um.getData()->ec[um.dist].getIndices(); //= index.dbg.
+  //int ec = index.dbGraph.ecs[v[0].first.contig];
+  Roaring lastEC = ec;
+  // find the roaring vector from the ecmap
+  Roaring u = ec;
 
   for (int i = 1; i < v.size(); i++) {
-    if (v[i].first.contig != v[i-1].first.contig) {
-      ec = index.dbGraph.ecs[v[i].first.contig];
-      if (ec != lastEC) {
-        u = index.intersect(ec, u);
+    // anytime the contig changes, update the ec
+    if (!v[i].first.isSameReferenceUnitig(v[i-1].first)) {
+      const auto um = v[i].first;
+      ec = um.getData()->ec[um.dist].getIndices();
+      if (!(ec == lastEC)) {
+        u &= ec;
         lastEC = ec;
-        if (u.empty()) {
+        if (u.cardinality() == 0) {
           return u;
         }
       }
     }
   }
-  return u;
-  */
+  return u;  
 }
 
 
-bool checkMapability(const KmerIndex& index, const std::string &s, const std::vector<std::pair<KmerEntry,int>>& v, std::vector<int> &u) {
 
-  return false;
-  /*
-  const int maxMismatch = 2;
-  const int maxSoftclip = 5;
-
-  Kmer km;
-  KmerEntry val;
-  int p;
-
-  if (!v.empty()) {
-    p = findFirstMappingKmer(v,val);
-    km = Kmer(s.c_str()+p);
-  } else {
-    return false;
-  }
-
-  std::vector<int> vtmp; vtmp.reserve(u.size());
-
-  for (auto tr : u) {
-    auto trpos = index.findPosition(tr, km, val, p);
-    int tpos = (int)trpos.first;
-    int sz = (int)s.size();
-    bool add = true; 
-    if (trpos.second) {
-      if (tpos < 1 || tpos + sz - 1 > index.target_seqs_[tr].size()) {
-        add = false;
-      } else {
-        //std::cout << index.target_seqs_[tr].substr(tpos,sz) << std::endl;
-        //std::cout << s << std::endl;
-        int mis = 0;
-        for (int i = 0; i < sz - maxSoftclip; i++) {
-          if (index.target_seqs_[tr][tpos-1 + i] != s[i]) {
-            ++mis;
-            if (mis > maxMismatch) {
-              break;
-            }
-          }
-        }
-        add = (mis <= maxMismatch);
-      }
-    }  else {
-      if (tpos > index.target_seqs_[tr].size() || tpos - sz < 1) {
-        add = false;
-      } else {
-        std::string rs = revcomp(s);
-        //std::cout << index.target_seqs_[tr].substr(tpos - sz, sz) << std::endl;
-        //std::cout << rs << std::endl;
-        int mis = 0;
-        for (int i = sz-1; i >= maxSoftclip; i--) {
-          if (index.target_seqs_[tr][tpos-sz+i] != rs[sz]) {
-            ++mis;
-            if (mis > maxMismatch) {
-              break;
-            }
-          }
-        }
-        add = (mis <= maxMismatch);
-      }
-    }
-
-    if (add) {
-      vtmp.push_back(tr);
-    }
-  }
-
-  if (vtmp.empty()) {
-    return false;
-  }
-
-  if (vtmp.size() < u.size()) {
-    u = vtmp; // copy
-  }
-
-  return true;
-  */
-}
 
 // returns true if the intersection of the union of EC classes for v1 and v2 respectively is empty
 bool checkUnionIntersection(const KmerIndex& index, const std::string &s1, const std::string &s2, std::pair<int,int> &p1, std::pair<int,int> &p2) {
 //const std::vector<std::pair<KmerEntry,int>>& v1, const std::vector<std::pair<KmerEntry,int>>& v2) {
   
-  // TODO:
-  /*
-  std::set<int> su1,su2;
+  Roaring su1,su2;
   
   auto union_set = [&](const std::string &s, std::pair<int,int> &p) {
     p = {-1,-1};
-    std::set<int> su;
+    Roaring su;
     
     KmerIterator kit(s.c_str()), kit_end;
-    int lastEC = -1;
+    Roaring lastEC;
     for (int i = 0; kit != kit_end; ++i,++kit) {
-      auto search = index.kmap.find(kit->first.rep());
-      if (search != index.kmap.end()) {
+      auto um = index.dbg.find(kit->first);
+      //auto search = index.kmap.find(kit->first.rep());
+      //if (search != index.kmap.end()) {
+      if (!um.isEmpty) {
         if (p.first == -1) {
           p.first = kit->second;
           p.second = p.first +1;
@@ -188,66 +132,41 @@ bool checkUnionIntersection(const KmerIndex& index, const std::string &s1, const
             p.second++;
           }
         }
-        const KmerEntry &val = search->second;
-        int ec = index.dbGraph.ecs[val.contig];
-        if (ec != -1 && ec != lastEC) {
-          su.insert(index.ecmap[ec].begin(), index.ecmap[ec].end());
+
+        //const KmerEntry &val = search->second;
+        ///int ec = index.dbGraph.ecs[val.contig];
+        Roaring ec = um.getData()->ec[um.dist].getIndices();
+
+        if (!(ec.cardinality() == 0) && !(ec == lastEC)) {
+          su |= ec;
           lastEC = ec;
         }
       }
-    }
-    
-    // ATTN:
-    // This was already commented out
-    // Consider removing as cruft
-    //int ec = index.dbGraph.ecs[v[0].first.contig];
-    //int lastEC = ec;
-    ////const std::vector<int> &u = index.ecmap[ec];
-    //s.insert(index.ecmap[ec].begin(), index.ecmap[ec].end());
-    //for (int i = 1; i < v.size(); i++) {
-      //if (v[i].first.contig != v[i-1].first.contig) {
-        //ec = index.dbGraph.ecs[v[i].first.contig];
-        //if (ec != lastEC) {
-          //s.insert(index.ecmap[ec].begin(), index.ecmap[ec].end());
-          //lastEC = ec;
-        //}
-      //}
-    //}
+    }    
     return su;
   };
 
   su1 = union_set(s1,p1);
   su2 = union_set(s2,p2);
   
-  if (su1.empty() || su2.empty()) {
+  if ((su1.cardinality()==0)  || (su2.cardinality()==0)) {
     return false; // TODO, decide on this
   }
   
-  if (su2.size() < su1.size()) {
-    swap(su1,su2);
-  }
-  for (auto x : su1) {
-    if (su2.count(x) != 0) {
-      return false;
-    }
-  }
-  return true;
-  */
-  return false;
+  Roaring su3 = su1 & su2;
+  return su3.cardinality() == 0;
 }
 
 
 void searchFusion(const KmerIndex &index, const ProgramOptions& opt,
-  const MinCollector& tc, MasterProcessor& mp, int ec,
-  const std::string &n1, const std::string &s1, std::vector<std::pair<KmerEntry,int>> &v1,
-  const std::string &n2, const std::string &s2, std::vector<std::pair<KmerEntry,int>> &v2, bool paired) {
+  const MinCollector& tc, MasterProcessor& mp, 
+  const std::string &n1, const std::string &s1, 
+  MappedVector &v1,
+  const std::string &n2, const std::string &s2, 
+  MappedVector &v2, 
+  bool paired) {
 
-  /*
-
-  bool partialMap = false;
-  if (ec != -1) {
-    partialMap = true;
-  }
+  
   std::stringstream o;
 
   // no mapping information
@@ -258,9 +177,10 @@ void searchFusion(const KmerIndex &index, const ProgramOptions& opt,
   auto u1 = simpleIntersect(index, v1);
   auto u2 = simpleIntersect(index, v2);
 
+  
   // discordant pairs
   if (!v1.empty() && !v2.empty()) {
-    if (!u1.empty() && !u2.empty()) {
+    if (!(u1.cardinality()==0) && !(u2.cardinality() == 0)) {
       std::pair<int,int> p1,p2;
       if (checkUnionIntersection(index, s1, s2, p1, p2)) {
         // each pair maps to either end
@@ -283,17 +203,18 @@ void searchFusion(const KmerIndex &index, const ProgramOptions& opt,
     }
   }
 
-  if ((v1.empty() && !u2.empty()) ||  (v2.empty() && !u1.empty())) {
-    // read was trimmed
-    partialMap = true;
+  if ((v1.empty() && (u1.cardinality() != 0)) || (v2.empty() && (u2.cardinality() != 0))) {
+    // read was trimmed    
     return;
   }
 
+
+
   // ok so ec == -1 and not both v1 and v2 are empty
   // exactly one of u1 and u2 are empty
-  std::vector<std::pair<KmerEntry,int>> vsafe, vsplit;
+  MappedVector vsafe, vsplit;
   // sort v1 and v2 by read position
-  auto vsorter =  [&](std::pair<KmerEntry, int> a, std::pair<KmerEntry, int> b) {
+  auto vsorter =  [&](std::pair<const_UnitigMap<Node>, int> a, std::pair<const_UnitigMap<Node>, int> b) {
     return a.second < b.second;
   };
 
@@ -301,7 +222,7 @@ void searchFusion(const KmerIndex &index, const ProgramOptions& opt,
   std::sort(v2.begin(), v2.end(), vsorter);
   bool split1 = true;
   if (!v1.empty() && !v2.empty()) {
-    if (u1.empty()) {
+    if (u1.cardinality() == 0) {
       std::copy(v1.begin(), v1.end(), std::back_inserter(vsplit));
       std::copy(v2.begin(), v2.end(), std::back_inserter(vsafe));
     } else {
@@ -310,14 +231,14 @@ void searchFusion(const KmerIndex &index, const ProgramOptions& opt,
       split1 = false;
     }
   } else if (v1.empty()) {
-    if (u2.empty()) {
+    if (u2.cardinality() == 0) {
       std::copy(v2.begin(), v2.end(), std::back_inserter(vsplit));
     } else {
       assert(false);
       return; // can this happen?
     }
   } else if (v2.empty()) {
-    if (u1.empty()) {
+    if (u1.cardinality() == 0) {
       std::copy(v1.begin(), v1.end(), std::back_inserter(vsplit));
     } else {
       assert(false);
@@ -336,10 +257,10 @@ void searchFusion(const KmerIndex &index, const ProgramOptions& opt,
     auto ut1 = simpleIntersect(index,vsplit);
     auto ut2 = simpleIntersect(index,vsafe);
 
-    if (!ut1.empty() && !ut2.empty()) {
+    if (!(ut1.cardinality() == 0) && !(ut2.cardinality() == 0)) {
       std::pair<int,int> p1,p2;
       std::string st1,st2;
-      if (u1.empty()) {
+      if (u1.cardinality() == 0) {
         st1 = s1.substr(0,vsafe.back().second);
         st2 = s2;
       } else {
@@ -356,7 +277,7 @@ void searchFusion(const KmerIndex &index, const ProgramOptions& opt,
           o << "\t\t\t";
         }
         o << "splitat=";
-        if (u1.empty()) {
+        if (u1.cardinality() == 0) {
           o << "(0,";
         } else {
           o << "(1,";
@@ -377,5 +298,5 @@ void searchFusion(const KmerIndex &index, const ProgramOptions& opt,
   }
 
   return;
-  */
+  
 }

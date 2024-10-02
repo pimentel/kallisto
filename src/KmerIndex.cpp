@@ -10,6 +10,7 @@
 #include <iostream>
 #include <unordered_map>
 #include <string>
+#include <set>
 #include "ColoredCDBG.hpp"
 
 // --aa option helper functions
@@ -231,6 +232,18 @@ std::pair<size_t,size_t> KmerIndex::getECInfo() const {
   return std::make_pair(max_ec_len, cardinality_zero_encounters);
 }
 
+// Begin Shading
+std::pair<std::string,std::string> shadedTargetName(std::string& name) {
+  if (name.find("_shade_") != std::string::npos) {
+    std::string name_header = "_shade_";
+    std::string tname = name.substr(0, name.find(name_header));
+    std::string variant = name.substr(name.find(name_header)+name_header.length(), name.size());
+    return std::make_pair(tname,variant); // Return the target name and the the associated shade
+  }
+  return std::make_pair("",""); // Not a shade
+}
+// End Shading
+
 void KmerIndex::BuildTranscripts(const ProgramOptions& opt, std::ofstream& out) {
   // read input
   u_set_<std::string> unique_names;
@@ -354,6 +367,18 @@ void KmerIndex::BuildTranscripts(const ProgramOptions& opt, std::ofstream& out) 
         }
         unique_names.insert(name);
         target_names_.push_back(name);
+        
+        // Begin Shading
+        auto shade_info = shadedTargetName(name);
+        if (shade_info.first != "") {
+          std::string tname = shade_info.first;
+          std::string variant = shade_info.second;
+          auto it = std::find(target_names_.begin(), target_names_.end(), tname);
+          if (it != target_names_.end()) {
+            shadeToColorTranscriptMap[target_names_.size()-1] = std::distance(target_names_.begin(), it);
+          }
+        }
+        // End Shading
       }
     }
 
@@ -399,6 +424,9 @@ void KmerIndex::BuildDistinguishingGraph(const ProgramOptions& opt, std::ofstrea
   size_t num_seqs = 0;
   int max_color = 0;
   u_set_<int> external_input_names;
+  // Begin Shading
+  std::set<std::string> variants_set; // Ordered set to keep track of variants (i.e. colors with shades)
+  // End Shading
   for (int i = 0; i < opt.transfasta.size(); i++) { // Currently, this should only be one file
     auto fasta = opt.transfasta[i];
     fp = opt.transfasta.size() == 1 && opt.transfasta[0] == "-" ? gzdopen(fileno(stdin), "r") : gzopen(fasta.c_str(), "r");
@@ -414,9 +442,23 @@ void KmerIndex::BuildDistinguishingGraph(const ProgramOptions& opt, std::ofstrea
         continue;
       }
       int color = std::atoi(strname.c_str());
+      // Begin Shading
+      std::string variant;
+      auto shade_info = shadedTargetName(strname);
+      if (shade_info.first != "") {
+        std::string tname = shade_info.first;
+        variant = shade_info.second;
+        color = std::atoi(tname.c_str());
+        variants_set.insert(std::to_string(color) + "_shade_" + variant);
+      }
+      // End Shading
       external_input_names.insert(color);
       if (color > max_color) max_color = color;
-      of << ">" << std::to_string(color) << "\n" << str << std::endl;
+      of << ">" << std::to_string(color);
+      // Begin Shading
+      if (!variant.empty()) of << "_shade_" << variant;
+      // End Shading
+      of << "\n" << str << std::endl;
       num_seqs++;
     }
     gzclose(fp);
@@ -437,6 +479,16 @@ void KmerIndex::BuildDistinguishingGraph(const ProgramOptions& opt, std::ofstrea
     target_names_.push_back(std::to_string(i));
     target_lens_.push_back(k); // dummy length (k-mer size)
   }
+  // Begin Shading
+  for (const auto& v : variants_set) {
+    num_trans++; // Each color-shade duo counts as an additional target
+    target_names_.push_back(v);
+    target_lens_.push_back(k); // dummy length (k-mer size)
+  }
+  if (num_trans != ncolors) {
+    std::cerr << "[build] Detected " << std::to_string(num_trans-ncolors) << " shades" << std::endl;
+  }
+  // End Shading
 
   std::cerr << "[build] Building graph from k-mers" << std::endl;
   BuildDeBruijnGraph(opt, tmp_file2, out);
@@ -449,6 +501,9 @@ void KmerIndex::BuildDistinguishingGraph(const ProgramOptions& opt, std::ofstrea
   std::vector<std::vector<TRInfo> > trinfos(dbg.size());
   std::ifstream infile_a(tmp_file2);
   int current_color = 0;
+  // Begin Shading
+  std::string current_variant;
+  // End Shading
   std::string line;
   while (std::getline(infile_a, line)) {
     if (line.length() == 0) {
@@ -458,6 +513,16 @@ void KmerIndex::BuildDistinguishingGraph(const ProgramOptions& opt, std::ofstrea
         current_color = onlist_sequences.cardinality();
       } else {
         current_color = std::atoi(line.c_str()+1);
+        // Begin Shading
+        current_variant = "";
+        std::string name = line.substr(1);
+        auto shade_info = shadedTargetName(name);
+        if (shade_info.first != "") {
+          std::string tname = shade_info.first;
+          current_variant = shade_info.second;
+          current_color = std::atoi(tname.c_str());
+        }
+        // End Shading
       }
       continue;
     }
@@ -481,8 +546,16 @@ void KmerIndex::BuildDistinguishingGraph(const ProgramOptions& opt, std::ofstrea
       tr.pos = (proc-um.len) | (!um.strand ? sense : missense);
       tr.start = um.dist;
       tr.stop  = um.dist + um.len;
-
       trinfos[n->id].push_back(tr);
+
+      // Begin Shading
+      if (!current_variant.empty()) {
+        auto it = variants_set.find(std::to_string(current_color) + "_shade_" + current_variant);
+        assert(it != variants_set.end());
+        tr.trid = ncolors + std::distance(variants_set.begin(), it);
+        trinfos[n->id].push_back(tr);
+      }
+      // End Shading
     }
   }
   infile_a.close();
@@ -995,6 +1068,13 @@ void KmerIndex::BuildEquivalenceClasses(const ProgramOptions& opt, const std::st
       tr.stop  = um.dist + um.len;
 
       trinfos[n->id].push_back(tr);
+      // Begin Shading
+      auto it = shadeToColorTranscriptMap.find(tr.trid);
+      if (it != shadeToColorTranscriptMap.end()) {
+        tr.trid = shadeToColorTranscriptMap[tr.trid];
+        trinfos[n->id].push_back(tr); // Add the color of the original transcript as well
+      }
+      // End Shading
     }
     j++;
   }
@@ -1020,6 +1100,11 @@ void KmerIndex::BuildEquivalenceClasses(const ProgramOptions& opt, const std::st
 
   std::cerr << "[build] target de Bruijn graph has k-mer length " << dbg.getK() << " and minimizer length "  << dbg.getG() << std::endl;
   std::cerr << "[build] target de Bruijn graph has " << dbg.size() << " contigs and contains "  << dbg.nbKmers() << " k-mers " << std::endl;
+  // Begin Shading
+  if (shadeToColorTranscriptMap.size() != 0) {
+    std::cerr << "[build] number of shades: " << std::to_string(shadeToColorTranscriptMap.size()) << std::endl;
+  }
+  // End Shading
 }
 
 void KmerIndex::PopulateMosaicECs(std::vector<std::vector<TRInfo> >& trinfos) {
@@ -1418,6 +1503,19 @@ void KmerIndex::load(ProgramOptions& opt, bool loadKmerTable, bool loadDlist) {
     in.read(buffer, tmp_size);
 
     target_names_.push_back(std::string(buffer));
+    // Begin Shading
+    auto shade_info = shadedTargetName(target_names_[target_names_.size()-1]);
+    if (shade_info.first != "") {
+      std::string tname = shade_info.first;
+      std::string variant = shade_info.second;
+      auto it = std::find(target_names_.begin(), target_names_.end(), tname);
+      if (it != target_names_.end()) {
+        shadeToColorTranscriptMap[i] = std::distance(target_names_.begin(), it);
+      }
+      use_shade = true;
+      shade_sequences.add(i);
+    }
+    // End Shading
   }
   delete[] buffer;
 
@@ -1438,6 +1536,11 @@ void KmerIndex::load(ProgramOptions& opt, bool loadKmerTable, bool loadDlist) {
   if (num_trans-onlist_sequences.cardinality() > 0) {
     std::cerr << "[index] number of D-list k-mers: " << pretty_num(static_cast<size_t>(num_trans-onlist_sequences.cardinality())) << std::endl;
   }
+  // Begin Shading
+  if (shadeToColorTranscriptMap.size() != 0) {
+    std::cerr << "[build] number of shades: " << std::to_string(shadeToColorTranscriptMap.size()) << std::endl;
+  }
+  // End Shading
 
   in.close();
 
@@ -1594,6 +1697,11 @@ int KmerIndex::mapPair(const char *s1, int l1, const char *s2, int l2) const {
 // post: v contains all equiv classes for the k-mers in s
 void KmerIndex::match(const char *s, int l, std::vector<std::pair<const_UnitigMap<Node>, int>>& v, bool partial, bool cfc) const{
   const Node* n;
+  
+  // Begin Shading
+  if (use_shade) partial = false;
+  // End Shading
+  if (do_union) partial = false;
 
   // TODO:
   // Rework KmerIndex::match() such that it uses the following type of logic
@@ -1664,6 +1772,8 @@ void KmerIndex::match(const char *s, int l, std::vector<std::pair<const_UnitigMa
       }
 
       v.push_back({um, kit->second});
+      
+      if (no_jump) continue;
 
       // Find start and end of O.G. kallisto contig w.r.t. the bifrost-kallisto
       // unitig

@@ -77,6 +77,11 @@ struct KmerIndex {
     //LoadTranscripts(opt.transfasta);
     load_positional_info = opt.bias || opt.pseudobam || opt.genomebam || !opt.single_overhang;
     dfk_onlist = opt.dfk_onlist;
+    do_union = opt.do_union;
+    no_jump = opt.no_jump;
+    // Begin Shading
+    use_shade = false;
+    // End Shading
   }
 
   ~KmerIndex() {}
@@ -131,6 +136,8 @@ struct KmerIndex {
   std::vector<std::string> target_names_;
   std::vector<std::string> target_seqs_; // populated on demand
   bool dfk_onlist; // If we want to not use D-list in intersecting ECs
+  bool do_union; // If we want to do "pseudoalignment" via a "union" rather than an "intersection"
+  bool no_jump; // If we want to skip the jumping logic during pseudoalignment
   bool target_seqs_loaded;
   bool load_positional_info; // when should we load positional info in addition to strandedness
 
@@ -141,6 +148,13 @@ struct KmerIndex {
   u_set_<Kmer, KmerHash> d_list;
   Kmer dummy_dfk;
   const_UnitigMap<Node> um_dummy;
+  
+  // Begin Shading
+  // Here, we use the concepts of "shades" as proposed by in Ornaments by Adduri & Kim, 2024 for bias-corrected allele-specific expression estimation
+  std::unordered_map<int, int> shadeToColorTranscriptMap;
+  Roaring shade_sequences;
+  bool use_shade;
+  // End Shading
 };
 
 #endif // KALLISTO_KMERINDEX_H

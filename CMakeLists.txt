@@ -5,18 +5,20 @@ project(kallisto)
 include(GNUInstallDirs)
 
 if(NOT MAX_KMER_SIZE)
-set(MAX_KMER_SIZE "32")
+    set(MAX_KMER_SIZE "32")
 endif()
 
 set(DO_ENABLE_AVX2 "")
 set(DO_ENABLE_COMPILATION_ARCH "")
+
 if(ENABLE_AVX2 MATCHES "OFF")
-add_compile_definitions("ENABLE_AVX2=OFF")
-set(DO_ENABLE_AVX2 "-DENABLE_AVX2=OFF")
+    add_compile_definitions("ENABLE_AVX2=OFF")
+    set(DO_ENABLE_AVX2 "-DENABLE_AVX2=OFF")
 endif(ENABLE_AVX2 MATCHES "OFF")
+
 if(COMPILATION_ARCH MATCHES "OFF")
-add_compile_definitions("COMPILATION_ARCH=OFF")
-set(DO_ENABLE_COMPILATION_ARCH "-DCOMPILATION_ARCH=OFF")
+    add_compile_definitions("COMPILATION_ARCH=OFF")
+    set(DO_ENABLE_COMPILATION_ARCH "-DCOMPILATION_ARCH=OFF")
 endif(COMPILATION_ARCH MATCHES "OFF")
 
 add_compile_definitions("MAX_KMER_SIZE=${MAX_KMER_SIZE}")
@@ -54,16 +56,17 @@ else()
     include(CheckCXXCompilerFlag)
     check_cxx_compiler_flag(-std=c++17 COMPILER_SUPPORTS_CXX17)
     if(COMPILER_SUPPORTS_CXX17)
-    set(CMAKE_CXX_STANDARD 17)
+        set(CMAKE_CXX_STANDARD 17)
     else()
-    set(CMAKE_CXX_STANDARD 11)
+        set(CMAKE_CXX_STANDARD 11)
     endif()
+
     set(CMAKE_CXX_STANDARD_REQUIRED ON)
     set(CMAKE_CXX_EXTENSIONS OFF)
 endif()
 
 #add_compile_options(-Wall -Wno-unused-function)
-add_compile_options(-Wno-subobject-linkage) # Suppress bifrost warning
+add_compile_options(-Wno-deprecated-declarations -Wno-subobject-linkage) # Suppress bifrost warning
 set(PROJECT_BIFROST_CMAKE_CXX_FLAGS "-Wno-subobject-linkage -Wno-return-type") # Suppress bifrost warning
 
 if(LINK MATCHES static)
@@ -108,8 +111,9 @@ if (ZLIBNG)
 endif(ZLIBNG)
 
 if (USE_BAM)
-include_directories(${htslib_PREFIX}/src/htslib)
+    include_directories(${htslib_PREFIX}/src/htslib)
 endif(USE_BAM)
+
 include_directories(${EXT_PROJECTS_DIR}/bifrost/build/src)
 
 ExternalProject_Get_Property(bifrost install_dir)
@@ -117,7 +121,6 @@ include_directories(${install_dir}/src)
 
 
 
-# add_compile_options(-Wdeprecated-register)
 
 add_subdirectory(src)
 include_directories(${EXT_PROJECTS_DIR})

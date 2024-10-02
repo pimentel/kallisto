@@ -221,6 +221,8 @@ void ParseOptionsEM(int argc, char **argv, ProgramOptions& opt) {
   int pbam_flag = 0;
   int gbam_flag = 0;
   int fusion_flag = 0;
+  int do_union_flag = 0;
+  int no_jump_flag = 0;
 
   const char *opt_string = "t:i:l:P:s:o:n:m:d:b:g:c:p:";
   static struct option long_options[] = {
@@ -251,6 +253,8 @@ void ParseOptionsEM(int argc, char **argv, ProgramOptions& opt) {
     {"gtf", required_argument, 0, 'g'},
     {"chromosomes", required_argument, 0, 'c'},
     {"priors", required_argument, 0, 'p'},
+    {"union", no_argument, &do_union_flag, 1},
+    {"no-jump", no_argument, &no_jump_flag, 1},
     {0,0,0,0}
   };
   int c;
@@ -376,6 +380,14 @@ void ParseOptionsEM(int argc, char **argv, ProgramOptions& opt) {
 
   if (fusion_flag) {
     opt.fusion = true;
+  }
+  
+  if (do_union_flag) {
+    opt.do_union = true;
+  }
+  
+  if (no_jump_flag) {
+    opt.no_jump = true;
   }
 }
 
@@ -539,6 +551,8 @@ void ParseOptionsBus(int argc, char **argv, ProgramOptions& opt) {
   int interleaved_flag = 0;
   int batch_barcodes_flag = 0;
   int dfk_onlist_flag = 0;
+  int do_union_flag = 0;
+  int no_jump_flag = 0;
 
   const char *opt_string = "i:o:x:t:lbng:c:T:P:r:e:B:N:";
   static struct option long_options[] = {
@@ -569,6 +583,8 @@ void ParseOptionsBus(int argc, char **argv, ProgramOptions& opt) {
     {"inleaved", no_argument, &interleaved_flag, 1},
     {"numReads", required_argument, 0, 'N'},
     {"batch-barcodes", no_argument, &batch_barcodes_flag, 1},
+    {"union", no_argument, &do_union_flag, 1},
+    {"no-jump", no_argument, &no_jump_flag, 1},
     {0,0,0,0}
   };
 
@@ -730,6 +746,14 @@ void ParseOptionsBus(int argc, char **argv, ProgramOptions& opt) {
   
   if (dfk_onlist_flag) {
     opt.dfk_onlist = true;
+  }
+  
+  if (do_union_flag) {
+    opt.do_union = true;
+  }
+  
+  if (no_jump_flag) {
+    opt.no_jump = true;
   }
   
   opt.single_overhang = true;
@@ -937,9 +961,18 @@ bool CheckOptionsBus(ProgramOptions& opt) {
     ret = false;
   }
 
-  if (opt.long_read && !(0 < opt.threshold < 1)) { 
+  if (opt.long_read && !(0 < opt.threshold && opt.threshold < 1)) { 
      std::cerr << "Threshold not in (0,1). Setting default threshold for unmapped kmers to 0.8" << std::endl;
      opt.threshold = 0.8;
+  }
+  
+  if (opt.do_union && (opt.long_read || opt.aa)) {
+    std::cerr << "--union is not compatible with this mode" << std::endl;
+    ret = false;
+  }
+  if (opt.no_jump && (opt.long_read || opt.aa)) {
+    std::cerr << "--no-jump is not compatible with this mode" << std::endl;
+    ret = false;
   }
 
   if (opt.long_read) { //opt.error_rate <= 0) {
@@ -1624,6 +1657,16 @@ bool CheckOptionsEM(ProgramOptions& opt, bool emonly = false) {
 
   if ((opt.fld != 0.0 && opt.sd == 0.0) || (opt.sd != 0.0 && opt.fld == 0.0)) {
     cerr << "Error: cannot supply mean/sd without supplying both -l and -s" << endl;
+    ret = false;
+  }
+  
+  
+  if (opt.do_union && (opt.long_read || opt.aa)) {
+    std::cerr << "--union is not compatible with this mode" << std::endl;
+    ret = false;
+  }
+  if (opt.no_jump && (opt.long_read || opt.aa)) {
+    std::cerr << "--no-jump is not compatible with this mode" << std::endl;
     ret = false;
   }
 
@@ -2324,9 +2367,9 @@ int main(int argc, char *argv[]) {
       if (opt.long_read) {
          double error_rate_threshold_tmp = ((1.0/opt.error_rate - 2*index.k) * opt.error_rate);
             //std::cerr << "Suggested threshold for novel reads to " << error_rate_threshold_tmp << std::endl;
-	    if (1 > opt.threshold > 0) {
+	    if (1 > opt.threshold && opt.threshold > 0) {
                //std::cerr << "Using supplied threshold " << opt.threshold << std::endl;  
-            } else if (0 < error_rate_threshold_tmp < 1) {
+            } else if (0 < error_rate_threshold_tmp && error_rate_threshold_tmp < 1) {
                opt.threshold = error_rate_threshold_tmp;
                std::cerr << "Using computed threshold " << opt.threshold << std::endl;
             } else {
@@ -2547,6 +2590,7 @@ int main(int argc, char *argv[]) {
         std::string(std::to_string(num_unique)),
         KALLISTO_VERSION,
         std::string(std::to_string(index.INDEX_VERSION)),
+	std::string(std::to_string(index.k)),
         start_time,
         call,
         opt.aa ? std::to_string(collection.cardinality_clashes) : "");
@@ -2972,7 +3016,7 @@ int main(int argc, char *argv[]) {
           }
 
           EMAlgorithm em(collection.counts, index, collection, fl_means, opt);
-          em.set_priors(priors);
+          if (opt.priors != "") em.set_priors(priors);
           em.run(10000, 50, false, false);
 
           if (isMatrixFile) { // Update abundances matrix
@@ -3133,8 +3177,6 @@ int main(int argc, char *argv[]) {
             cerr << endl;
           }
         }; // end of EM_lambda
-
-        priors.clear();
 
 
         std::vector<std::thread> workers;

@@ -5,7 +5,7 @@
 
 #include "ProcessReads.h"
 #include "PseudoBam.h"
-#include "Fusion.hpp"
+#include "Fusion.h"
 #include "BUSData.h"
 #include "BUSTools.h"
 #include "Node.hpp"
@@ -58,7 +58,28 @@ std::pair<const_UnitigMap<Node>, int> findFirstMappingKmer(const std::vector<std
   return std::make_pair(um, p);
 }
 
-void doStrandSpecificity(Roaring& u, const ProgramOptions::StrandType strand, const std::vector<std::pair<const_UnitigMap<Node>, int32_t> >& v, const std::vector<std::pair<const_UnitigMap<Node>, int32_t> >& v2) {
+void doStrandSpecificity(Roaring& u, const ProgramOptions::StrandType strand, const std::vector<std::pair<const_UnitigMap<Node>, int32_t> >& v, const std::vector<std::pair<const_UnitigMap<Node>, int32_t> >& v2, bool comprehensive = false) {
+  if (comprehensive) { // Comprehensive means we check every position's strand specificity (not used in standard usage)
+    Roaring final_u;
+    for (int i = 0; i < v.size(); i++) {
+      Roaring u_ = u; // for union and shades and no-jump
+      std::vector<std::pair<const_UnitigMap<Node>, int32_t> > v_;
+      std::vector<std::pair<const_UnitigMap<Node>, int32_t> > v2_;
+      v_.push_back(v[i]); 
+      doStrandSpecificity(u_, strand, v_, v2, false);
+      final_u |= u_;
+    }
+    for (int i = 0; i < v2.size(); i++) {
+      Roaring u_ = u; // for union and shades and no-jump
+      std::vector<std::pair<const_UnitigMap<Node>, int32_t> > v_;
+      std::vector<std::pair<const_UnitigMap<Node>, int32_t> > v2_;
+      v2_.push_back(v2[i]); 
+      doStrandSpecificity(u_, strand, v_, v2, false);
+      final_u |= u_;
+    }
+    u = final_u;
+    return;
+  }
   int p = -1;
   const_UnitigMap<Node> um;
   Roaring vtmp;
@@ -241,6 +262,13 @@ int64_t ProcessBUSReads(MasterProcessor& MP, const  ProgramOptions& opt) {
   size_t nummapped = 0;
   bool paired = !opt.single_end && !opt.long_read;
 
+  if (paired) {
+    std::cerr << "[quant] running in paired-end mode" << std::endl;
+  } else if (opt.long_read) {
+    std::cerr << "[quant] running in long read mode" << std::endl;
+  } else {
+    std::cerr << "[quant] running in single-end mode" << std::endl;
+  }
   for (int i = 0, si=1; i < opt.files.size(); si++) {
     auto& busopt = opt.busOptions;
     std::cerr << "[quant] will process sample " << si<< ": ";
@@ -1029,6 +1057,8 @@ void ReadProcessor::processBuffer() {
     } else {
       index.match(s1, l1, v1, !paired);
     }
+
+
     if (paired) {
       index.match(s2, l2, v2, !paired);
     }
@@ -1045,9 +1075,36 @@ void ReadProcessor::processBuffer() {
 
     if (u.isEmpty()) {
       if (mp.opt.fusion && !(v1.empty() || v2.empty())) {
-        std::cerr << "TODO: Implement fusion" << std::endl;
-        exit(1);
-        //searchFusion(index,mp.opt,tc,mp,ec,names[i-1].first,s1,v1,names[i].first,s2,v2,paired);
+        // make sure that none of the d-list k-mers mapped
+        bool findFusion = true;
+        for (const auto& um : v1) {
+          if (um.first == index.um_dummy) {
+            findFusion = false;
+            break;
+          }
+        }
+
+        for (const auto& um : v2) {
+          if (um.first == index.um_dummy) {
+            findFusion = false;
+            break;
+          }
+        }
+
+        if (findFusion) {
+          const char* n1 = 0;
+          const char* n2 = 0;
+          if (paired) {
+            n1 = names[i-1].first;
+            n2 = names[i].first;
+          } else {
+            n1 = names[i].first;
+          }
+          searchFusion(index,mp.opt,tc,mp,
+                    n1,s1,v1,
+                    n2,s2,v2,
+                    paired);
+        }
       }
       novel = true; 
     }
@@ -1086,8 +1143,7 @@ void ReadProcessor::processBuffer() {
 	      }
 	      
 	      // for each transcript in the pseudoalignment
-	      for (auto tr : u) {
-	        
+	      for (auto tr : u) {        
 	        auto x = index.findPosition(tr, km, um, p);
 	        // if the fragment is within bounds for this transcript, keep it
 	        if (x.second && x.first + fl <= (int)index.target_lens_[tr]) {
@@ -1095,6 +1151,7 @@ void ReadProcessor::processBuffer() {
 	        } else {
 	          //pass
 	        }
+
 	        if (!x.second && x.first - fl >= 0) {
 	          vtmp.add(tr);
 	        } else {
@@ -1108,7 +1165,12 @@ void ReadProcessor::processBuffer() {
 	    }
 
 	    if (mp.opt.strand_specific && !u.isEmpty()) {
-	      doStrandSpecificity(u, mp.opt.strand, v1, v2);
+	      bool comprehensive = false;
+	      if (mp.opt.do_union || mp.opt.no_jump) comprehensive = true;
+	      // Begin Shading
+	      if (index.use_shade) comprehensive = true;
+	      // End Shading
+	      doStrandSpecificity(u, mp.opt.strand, v1, v2, comprehensive);
 	    }
 
 	    // find the ec
@@ -1130,8 +1192,7 @@ void ReadProcessor::processBuffer() {
 	      /* -- collect extra information -- */
 	      // collect bias info
 	      if (findBias && !u.isEmpty() && biasgoal > 0) {
-	        // collect sequence specific bias info
-	        
+	        // collect sequence specific bias info	        
 	        if (tc.countBias(s1, (paired) ? s2 : nullptr, v1, v2, paired, bias5)) {
 	          biasgoal--;
 	        }
@@ -1693,7 +1754,12 @@ void BUSProcessor::processBuffer() {
       }
       
       if (doStrandSpecificityIfPossible && mp.opt.strand_specific && !u.isEmpty()) { // Strand-specificity
-        doStrandSpecificity(u, mp.opt.strand, v, v2);
+        bool comprehensive = false;
+        if (mp.opt.do_union || mp.opt.no_jump) comprehensive = true;
+        // Begin Shading
+        if (index.use_shade) comprehensive = true;
+        // End Shading
+        doStrandSpecificity(u, mp.opt.strand, v, v2, comprehensive);
       }
       
       // find the ec
