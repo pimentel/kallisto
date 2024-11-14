@@ -116,7 +116,6 @@ void printHisto(const std::unordered_map<int,int>& m, const std::string& header)
 }
 
 void InspectIndex(const KmerIndex& index, const ProgramOptions& opt) {
-
   std::string gfa = opt.gfa;
   std::string bed = opt.bedFile;
 
@@ -140,7 +139,53 @@ void InspectIndex(const KmerIndex& index, const ProgramOptions& opt) {
   // std::cout << "#[inspect] Number of k-mers in index = " << index.dbg.nbKmers() << std::endl;
 
   if (!gfa.empty()) {
-    //index.dbg.write(gfa);
+    index.dbg.write(gfa);
+  }
+
+  // for every contig
+  if (opt.inspect_thorough) {
+    for (const auto& contig : index.dbg) {
+      const Node* n = contig.getData();    
+    
+      auto seq = contig.referenceUnitigToString();
+      KmerIterator it(seq.c_str());
+      KmerIterator it_end;
+      int i = 0;
+      while(it != it_end) {
+        const Kmer km = it->first;
+        const Kmer tw = km.twin();   
+        auto um = index.dbg.find(km);
+        auto um_tw = index.dbg.find(tw);
+        if (um.isEmpty || um_tw.isEmpty) {      
+          std::cout << "contig id: " << n->id << "\n";
+          std::cout << "Kmer " << km.toString() << " is empty\n";
+          exit(1);
+        }
+
+
+
+        if (um.dist != i || !um.strand) {
+          std::cout << "contig id: " << n->id << "\n";
+          std::cout << "Kmer " << km.toString() << " is not in the correct position\n";
+          std::cout << "Expected position: " << i << ", actual position: " << um.dist << "\n";
+          std::cout << "seq: " << seq << "\n";
+          exit(1);
+        }
+        if (um_tw.dist != i || um_tw.strand ) {
+          std::cout << "contig id: " << n->id << "\n";
+          std::cout << "Kmer " << km.toString() << " is not in the correct position\n";
+          std::cout << "Expected position: " << i << ", actual position: " << um_tw.dist << "\n";
+          std::cout << "seq: " << seq << "\n";
+          exit(1);
+        }
+
+        ++it;
+        ++i;
+      }
+    }
+    
+    
+
   }
 
   // TODO:
@@ -276,6 +321,165 @@ void InspectIndex(const KmerIndex& index, const ProgramOptions& opt) {
     }
   }
   */
+
+
+  auto verifySequencePositions = [&](const int tr, const std::string& sequence) {
+    KmerIterator kit(sequence.c_str()), kit_end;
+    int tpos = 0;
+    int trlen = index.target_lens_[tr];
+    // find how many As are in the end of the sequence
+    int num_As = 0;
+    for (int i = sequence.size()-1; i >= 0; i--) {
+      if (sequence[i] == 'A') {
+        num_As++;
+      } else {
+        break;
+      }
+    }
+    trlen -= num_As;
+    for (; kit != kit_end; ++kit) {
+      Kmer km = kit->first;
+      Kmer tw = km.twin();
+      size_t pos = kit->second;
+      if (pos + index.k - 1 >= trlen) {
+        continue;
+      }
+
+      auto um = index.dbg.find(km);
+      if (um.isEmpty) {
+        std::cout << "Error: Kmer " << km.toString() << " from sequence " << index.target_names_[tr] 
+                  << " at position " << pos << " not found in the index." << std::endl;
+        exit(1);
+      }
+      auto um_tw = index.dbg.find(tw);
+      if (um_tw.isEmpty) {
+        std::cout << "Error: Kmer " << tw.toString() << " from sequence " << index.target_names_[tr] 
+                  << " at position " << pos << " not found in the index." << std::endl;
+        exit(1);
+      }      
+      auto indexPositions = index.findPositions(tr, km, um);
+      bool positionMatched = false;
+      for (const auto& indexPos : indexPositions) {
+        // check if any of the index positions match the position in the sequence
+        if (indexPos.first == pos+1 && indexPos.second) {
+          positionMatched = true;
+          break;
+        }
+      }
+
+      if (!positionMatched) {
+        std::cout << "Error: Mismatch for kmer " << km.toString() << " from sequence " << index.target_names_[tr] 
+                  << " (tr: " << tr << ") at position " << pos << ". Index position not found in sequence." << std::endl;
+        
+        if (!indexPositions.empty()) {
+          std::cout << "Index positions: ";
+          for (const auto& indexPos : indexPositions) {
+            std::cout << indexPos.first << " " << indexPos.second << " ";
+            std::cout << " um.dist: " << um.dist << std::endl;
+          }
+          std::cout << std::endl;
+        } else {
+          std::cout << "No index positions found for kmer " << km.toString() << " from sequence " << index.target_names_[tr] 
+                    << " at position " << pos << "." << std::endl;
+        }
+        // continue;
+        exit(1);
+      }
+      indexPositions.clear();
+      indexPositions = index.findPositions(tr, tw, um_tw);
+      positionMatched = false;
+      for (const auto& indexPos : indexPositions) {
+        if (indexPos.first == pos+k && !indexPos.second) {
+          positionMatched = true;
+          break;
+        }
+      }
+      if (!positionMatched) {
+        std::cout << "Error: Mismatch for twin of kmer " << tw.toString() << " from sequence " << index.target_names_[tr] 
+                  << " at position " << pos << ". Index position not found in sequence." << std::endl;
+        if (!indexPositions.empty()) {
+          std::cout << "Index positions: ";
+          for (const auto& indexPos : indexPositions) {
+            std::cout << indexPos.first << " " << indexPos.second << " ";
+          }
+          std::cout << std::endl;
+        }
+        continue;
+      }
+    }
+  };
+
+  
+  if (opt.inspect_thorough) {
+    std::string fastaFile = opt.transcriptsFile;  
+    if (!fastaFile.empty()) {
+      std::ifstream fasta(fastaFile);
+      if (!fasta.is_open()) {
+        std::cerr << "Error: Unable to open FASTA file " << fastaFile << std::endl;
+        return;
+      }
+
+      std::string line, header, sequence;
+      // measure the time it takes to load the transcript sequences
+      
+      index.loadTranscriptSequences();
+      
+      int tr = 0;
+      while (std::getline(fasta, line)) {
+        if (line[0] == '>') {
+          if (!sequence.empty()) {
+            if (sequence.size() >= index.k) {
+              
+              // Process the previous sequence
+              verifySequencePositions(tr, sequence);
+              if (sequence != index.target_seqs_[tr]) {
+                // count polyA tail
+                int num_As = 0;
+                for (int i = sequence.size()-1; i >= 0; i--) {
+                  if (sequence[i] == 'A') {
+                    num_As++;
+                  } else {
+                    break;
+                  }
+                }
+               
+                // iterate over the characters and match unless the sequences has an N
+                bool mismatch = false;
+                for (int i = 0; i < sequence.size()-num_As; i++) {
+                  if (sequence[i] != index.target_seqs_[tr][i] && sequence[i] != 'N') {
+                    mismatch = true;
+                    break;
+                  }
+                }
+                if (mismatch) {
+                  std::cout << "Error: Sequence mismatch for transcript " << index.target_names_[tr] << std::endl;
+                  std::cout << ">expected \n" << sequence << "\n"
+                            << ">found \n" << index.target_seqs_[tr] << std::endl;
+                  exit(1);
+                }
+                
+              }
+            }
+            sequence.clear();
+            tr++;
+          }
+          header = line.substr(1);
+        } else {
+          sequence += line;
+        }
+      }
+      // Process the last sequence
+      if (!sequence.empty()) {
+        verifySequencePositions(tr, sequence);
+        if (sequence != index.target_seqs_[tr]) {
+          std::cout << "Error: Sequence mismatch for transcript " << index.target_names_[tr] << std::endl;
+          exit(1);
+        }
+      }
+    }
+  }
 }
+
+
 
 #endif // KALLISTO_INSPECTINDEX_H

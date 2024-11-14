@@ -1063,7 +1063,10 @@ void KmerIndex::BuildEquivalenceClasses(const ProgramOptions& opt, const std::st
       TRInfo tr;
 
       tr.trid = std::min<size_t>(j, onlist_sequences.cardinality());
+      // tr.pos the position of the unitig from the start of the transcript
       tr.pos = (proc-um.len) | (!um.strand ? sense : missense);
+      // this segment seq[tr.pos:proc] of the transript
+      // maps to unitig[start:stop]
       tr.start = um.dist;
       tr.stop  = um.dist + um.len;
 
@@ -1155,7 +1158,7 @@ void KmerIndex::PopulateMosaicECs(std::vector<std::vector<TRInfo> >& trinfos) {
         if (tr.start <= brpoints[i-1] && tr.stop >= brpoints[i]) {
           u.insert(tr.trid, tr.pos);
         }
-      }
+      }    
 
       assert(!u.isEmpty());
       u.runOptimize();
@@ -2188,48 +2191,102 @@ double KmerIndex::match_long(const char *s, int l, std::vector<std::pair<const_U
 std::pair<int,bool> KmerIndex::findPosition(int tr, Kmer km, int p) const{
   const_UnitigMap<Node> um = dbg.find(km);
   if (!um.isEmpty) {
-    return findPosition(tr, km, um, p);
+    auto a = findPositions(tr, km, um, p);
+    if (a.size() > 0) {
+      return a[0];
+    } else {
+      return {-1,true};
+    }
   } else {
     return {-1,true};
   }
 }
 
-//use:  (pos,sense) = index.findPosition(tr,km,val,p)
-//pre:  index.kmap[km] == val,
-//      km is the p-th k-mer of a read
-//      val.contig maps to tr
-//post: km is found in position pos (1-based) on the sense/!sense strand of tr
-std::pair<int,bool> KmerIndex::findPosition(int tr, Kmer km, const_UnitigMap<Node>& um, int p) const {
+std::pair<int,bool> KmerIndex::mapTranscriptPosition(int tr, uint32_t rawpos, const const_UnitigMap<Node>& um, int p, bool multipos) const {
   bool csense = um.strand;
-  int trpos = -1;
-  uint32_t bitmask = 0x7FFFFFFF, rawpos;
-  bool trsense = true;
-  if (um.getData()->id == -1) {
-    return {-1, true};
-  }
   const Node* n = um.getData();
-  auto mc = n->get_mc_contig(um.dist);
-  auto ecs = n->ec.get_leading_vals(um.dist);
-  const auto& v_ec = ecs[ecs.size() - 1];
-  const Roaring& ec = v_ec.getIndices(); // transcripts
-  
-  rawpos = v_ec.get(tr, true).minimum();
-  trpos = rawpos & bitmask;
-  trsense = (rawpos == trpos);
-  auto um_dist = um.dist - mc.first; // for mosaic ECs, need to start from beginning of current block, not zero
-  
+  const uint32_t bitmask = 0x7FFFFFFF;
+  uint32_t trpos = rawpos & bitmask;
+  bool trsense = (rawpos == trpos);
   if (trpos == -1) {
-    return {-1,true};
+    return {std::numeric_limits<int>::min(),true};
   }
   
-  std::pair<int,bool> ret;
-  
+  std::pair<int,bool> ret = {std::numeric_limits<int>::min(),true};
+
+  if (trsense) {
+    
+    size_t padding = 0;
+    if (trpos == 0 && n->ec.size() > 1) {
+      auto mc = n->get_mc_contig(um.dist);
+      auto ecs = n->ec.get_leading_vals(um.dist);
+      const auto& v_ec = ecs[ecs.size() - 1];
+    
+      for (int i = ecs.size()-2; i >= 0; i--) {          
+        if (!ecs[i].contains(tr)) {
+          padding = mc.first;
+          break;
+        } else {
+          // check if the positions match            
+          if (!ecs[i].get(tr,false).contains(trpos)) {
+            padding = mc.first;
+            break;
+          }
+        }
+        mc = n->get_mc_contig(mc.first-1);
+      }
+    }
+    ret = {static_cast<int64_t>(trpos + static_cast<int64_t>(um.dist) + 1 - padding), csense}; // Case I
+    if (!csense) {
+      ret.first += k-1 + p;
+    } else {
+      ret.first -= p;
+    }
+    return ret;
+  } else {    
+    size_t r_end = um.size - k;
+    if (trpos==0 && n->ec.size() > 1) {
+      // find all the ecs
+      auto mc = n->get_mc_contig(um.dist);
+      auto ecs_ = n->ec.get_trailing_vals(mc.second);
+      auto mc_ = n->get_mc_contig(mc.second);
+      for (int i = 0; i < ecs_.size(); i++) {
+        if (!ecs_[i].contains(tr)) {
+          r_end = mc_.first-1;
+          break;
+        } else {
+          if (!ecs_[i].get(tr,false).contains(rawpos)) {
+            r_end = mc_.first-1;
+            break;
+          }
+        }
+        mc_ = n->get_mc_contig(mc_.second);
+      }
+    }
+
+    
+    ret = {static_cast<int64_t>(trpos + static_cast<int64_t>(r_end - um.dist) + 1), !csense};
+    if (csense) {
+      ret.first += k-1 + p;
+    } else {
+      ret.first -= p;
+    }
+
+  }
+
+  return ret;
+  /*
   if (trsense) {
     if (csense) {
       size_t padding = 0;
       if (trpos == 0) {
+
         for (int i = ecs.size()-2; i >= 0; i--) {
           if (!ecs[i].contains(tr)) {
+            padding = mc.first;
+            break;
+          } 
+          if (multipos) {
             padding = mc.first;
             break;
           }
@@ -2238,17 +2295,26 @@ std::pair<int,bool> KmerIndex::findPosition(int tr, Kmer km, const_UnitigMap<Nod
       }
       ret = {static_cast<int64_t>(trpos - p + static_cast<int64_t>(um.dist) + 1 - padding), csense}; // Case I
     } else {
-      int64_t padding = um.size-mc.second+1-k;
+      int64_t padding;// = um.size-mc.second+1-k; // kmer position of the end of the contig
       int64_t initial = mc.second;
       
-      int right_one = 0;
+      int right_one = mc.second;
       int left_one = 0;
-      for (int i = ecs.size()-1; i >= 0; i--) {
-        if (i == ecs.size()-1) right_one = mc.second;
-        if (!ecs[i].contains(tr)) { left_one = mc.second; break; }
-        else if (i == 0) left_one = 0;
+
+      for (int i = ecs.size()-2; i >= 0; i--) {
+        if (!ecs[i].contains(tr)) { 
+          left_one = mc.first; 
+          break; 
+        } 
+        if (multipos) {
+          left_one = mc.first;
+          break;
+        }
+        
         mc = n->get_mc_contig(mc.first-1); // if goes below 0, it'll be cast as the largest unsigned int and return the right-most block
       }
+
+
       padding = -(left_one+right_one-um.size+k-1);
       ret = {trpos + p + k - (um.size - k - um.dist) + initial - 1 + padding, csense}; // Case III
     }
@@ -2303,6 +2369,47 @@ std::pair<int,bool> KmerIndex::findPosition(int tr, Kmer km, const_UnitigMap<Nod
     }
   }
   return ret;
+  */
+};
+
+//use:  (pos,sense) = index.findPosition(tr,km,val,p)
+//pre:  index.kmap[km] == val,
+//      km is the p-th k-mer of a read
+//      val.contig maps to tr
+//post: km is found in position pos (1-based) on the sense/!sense strand of tr
+std::vector<std::pair<int,bool>> KmerIndex::findPositions(int tr, Kmer km, const const_UnitigMap<Node>& um, int p) const {
+  bool csense = um.strand;
+  int trpos = -1;
+  uint32_t bitmask = 0x7FFFFFFF;  
+  if (um.getData()->id == -1) {
+    return {};
+  }
+  const Node* n = um.getData();
+  auto mc = n->get_mc_contig(um.dist);
+  auto ecs = n->ec.get_leading_vals(um.dist);
+  const auto& v_ec = ecs[ecs.size() - 1];
+  //const Roaring& ec = v_ec.getIndices(); // transcripts
+  
+  
+  
+  auto um_dist = um.dist - mc.first; // for mosaic ECs, need to start from beginning of current block, not zero
+  
+
+
+  auto rawpositions = v_ec.get(tr, false);
+  std::vector<std::pair<int,bool>> ret;
+  for (const auto rawpos : rawpositions) {
+    auto a = mapTranscriptPosition(tr, rawpos, um, p, rawpositions.cardinality() > 1);    
+    if (a.first != std::numeric_limits<int>::min()) {
+      ret.push_back(a);    
+    }
+  }
+  return ret;
+  
+
+
+
+  
 }
 
 // use:  res = intersect(ec,v)
@@ -2326,13 +2433,70 @@ Roaring KmerIndex::intersect(const Roaring& ec, const Roaring& v) const {
   return res;
 }
 
+
+
+
 void KmerIndex::loadTranscriptSequences() const {
   if (target_seqs_loaded) {
+    std::cerr << "Transcript sequences already loaded" << std::endl;
     return;
+  }
+  
+
+  auto &target_seqs = const_cast<std::vector<std::string>&>(target_seqs_);
+  target_seqs.clear();
+  for (int i = 0; i < num_trans; i++) {
+    int len = target_lens_[i];
+    target_seqs.emplace_back(len, ' ');    
+  }
+  
+
+  const uint32_t bitmask = 0x7FFFFFFF;
+  // iterate over contigs
+  std::vector<SparseVector<uint32_t>> vals;
+  
+  for (const const_UnitigMap<Node>& contig : dbg) {
+    auto n = contig.getData();
+    auto id = n->id;
+    std::string seq = contig.referenceUnitigToString();
+    
+    n->ec.get_vals(vals);
+    int j = 0;
+    size_t contigpos = 0;
+    while (contigpos < contig.len) {
+      
+      auto mc = n->ec.get_block_at(contigpos);
+      // [mc.first: mc.second] is the current block
+      auto blocklen = mc.second - mc.first + k-1;
+      auto blockseq = seq.substr(mc.first, blocklen);
+      Kmer km(blockseq.c_str());
+      const auto &val = vals[j];
+      
+      const Roaring &trs = val.getIndices();
+      for (const auto &tr: trs) {
+        auto um = dbg.find(km);
+        for (const auto &p : findPositions(tr, km, um, 0)) {
+          if (p.second) {          
+            assert(target_seqs[tr].size() == target_lens_[tr]);
+            assert(p.first-1 >= 0);
+            assert(p.first-1+blocklen <= target_seqs[tr].size());
+            target_seqs[tr].replace(p.first-1, blocklen, blockseq);
+          } else {
+            assert(target_seqs[tr].size() == target_lens_[tr]);
+            std::string rc_blockseq = revcomp(blockseq);  
+            assert(p.first-blocklen >= 0);
+            assert(p.first-blocklen+blocklen <= target_seqs[tr].size());
+            target_seqs[tr].replace(p.first-blocklen, blocklen, rc_blockseq);
+          }          
+        }
+      }
+      contigpos = mc.second;    
+      ++j;
+    }
   }
 
   bool &t = const_cast<bool&>(target_seqs_loaded);
-  t = true;//target_seqs_loaded = true;
+  t = true;
   return;
 }
 

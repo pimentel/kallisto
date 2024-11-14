@@ -557,9 +557,11 @@ void MasterProcessor::update(const std::vector<uint32_t>& c, const std::vector<R
       }
       // find the smallest batch id
       auto min_it = std::min_element(pseudobatch_stragglers.begin(), pseudobatch_stragglers.end(),
-      [](const PseudoAlignmentBatch &p1, const PseudoAlignmentBatch &p2) -> bool {
-        return p1.batch_id < p2.batch_id;
-      });
+        [](const PseudoAlignmentBatch &p1, const PseudoAlignmentBatch &p2) -> bool {
+          return p1.batch_id < p2.batch_id;
+        }
+      );
+      
       if ((last_pseudobatch_id + 1) != min_it->batch_id) {
         break;
       }
@@ -716,6 +718,10 @@ void MasterProcessor::processAln(const EMAlgorithm& em, bool useEM = true) {
       }
     }
   }
+
+
+  index.loadTranscriptSequences();
+
 
   assert(opt.pseudobam);
   pseudobatchf_in.open(opt.output + "/pseudoaln.bin", std::ios::in | std::ios::binary);
@@ -1144,19 +1150,23 @@ void ReadProcessor::processBuffer() {
 	      
 	      // for each transcript in the pseudoalignment
 	      for (auto tr : u) {        
-	        auto x = index.findPosition(tr, km, um, p);
+	        auto positions = index.findPositions(tr, km, um, p);
 	        // if the fragment is within bounds for this transcript, keep it
-	        if (x.second && x.first + fl <= (int)index.target_lens_[tr]) {
-	          vtmp.add(tr);
-	        } else {
-	          //pass
-	        }
+	        for (const auto& x : positions) {
+            if (x.second && x.first + fl <= (int)index.target_lens_[tr]) {
+              vtmp.add(tr);
+              break;
+            } else {
+              //pass
+            }
 
-	        if (!x.second && x.first - fl >= 0) {
-	          vtmp.add(tr);
-	        } else {
-	          //pass
-	        }
+            if (!x.second && x.first - fl >= 0) {
+              vtmp.add(tr);
+              break;
+            } else {
+              //pass
+            }
+          }
 	      }
 	      
 	      if (vtmp.cardinality() < u.cardinality()) {
@@ -1239,7 +1249,7 @@ void ReadProcessor::processBuffer() {
 	        }
 	        if (!info.r2empty) {
 	          auto res = findFirstMappingKmer(v2);
-	          info.k1pos = res.second;
+	          info.k2pos = res.second;
 	        }
 	        
 	        info.ec = u;
@@ -1876,7 +1886,7 @@ AlnProcessor::AlnProcessor(const KmerIndex& index, const ProgramOptions& opt, Ma
    // initialize buffer
    bufsize = mp.bufsize;
    buffer = new char[bufsize];
-   bambufsize = 1<<20;
+   bambufsize = 1<<24;
    bambuffer = new char[bambufsize]; // refactor this?
 
    if (opt.batch_mode) {
@@ -1995,6 +2005,7 @@ void AlnProcessor::processBufferTrans() {
   int n = pseudobatch.aln.size();
   std::vector<std::pair<int,double> > ua;
   ua.reserve(1000);
+  std::vector<uint32_t> trs(1000);
 
   int trans_auxlen = default_trans_auxlen;
   if (!useEM) {
@@ -2067,8 +2078,11 @@ void AlnProcessor::processBufferTrans() {
       int bestProbTr = -1;
       double bestProb = 0.0;
 
-      uint32_t* trs = new uint32_t[nmap];
-      pi.ec.toUint32Array(trs);
+      
+      
+      trs.clear();
+      trs.resize(nmap, -1);
+      pi.ec.toUint32Array(trs.data());
       if (useEM) {
 
         double denom = 0.0;
@@ -2100,8 +2114,6 @@ void AlnProcessor::processBufferTrans() {
         bestProbTr = trs[0];
       }
 
-      delete[] trs;
-      trs = nullptr;
 
       nmap = ua.size();
 
@@ -2235,19 +2247,23 @@ void AlnProcessor::processBufferTrans() {
           bestTr = (t == bestProbTr);
           std::pair<int,bool> pos1, pos2;
 
+          
+
           if (!pi.r1empty) {
-            pos1 = index.findPosition(t, km1, val1, pi.k1pos);
+            pos1 = index.findPosition(t, km1, pi.k1pos);
           } else {
             pos1 = {std::numeric_limits<int>::min(), true};
           }
 
           if (paired) {
             if (!pi.r2empty) {
-              pos2 = index.findPosition(t, km2, val2, pi.k2pos);
+              pos2 = index.findPosition(t, km2, pi.k2pos);
             } else {
               pos2 = {std::numeric_limits<int>::min(), true}; // use true so we don't reverse complement it
             }
           }
+
+        
 
           // move data part of bamcore.
           b1c = b1;
@@ -2389,7 +2405,6 @@ void AlnProcessor::processBufferTrans() {
 
 
 void AlnProcessor::processBufferGenome() {
-  /* something simple where we can construct the bam records */
 
   std::vector<bam1_t> bv;
   int idnum = 0;
@@ -2397,6 +2412,8 @@ void AlnProcessor::processBufferGenome() {
   int n = pseudobatch.aln.size();
   std::vector<std::pair<int,double>> ua;
   ua.reserve(1000);
+  std::vector<uint32_t> trs;
+  trs.reserve(1000);
 
   int bclen = 0;
   int umilen = 0;
@@ -2555,6 +2572,7 @@ void AlnProcessor::processBufferGenome() {
         bv.push_back(b2);
       }
     } else {
+      ua.clear();
       auto it = index.ecmapinv.find(pi.ec);
       uint32_t ec;
       if (it != index.ecmapinv.end()) {
@@ -2568,8 +2586,9 @@ void AlnProcessor::processBufferGenome() {
       int bestProbTr = -1;
       double bestProb = 0.0;
 
-      uint32_t* trs = new uint32_t[nmap];
-      pi.ec.toUint32Array(trs);
+      trs.clear();
+      trs.resize(nmap, -1);
+      pi.ec.toUint32Array(trs.data());
       if (useEM) {
 
         double denom = 0.0;
@@ -2584,7 +2603,7 @@ void AlnProcessor::processBufferGenome() {
         } else {
           // compute the update step
           for (int i = 0; i < nmap; ++i) {
-            if (em.alpha_[trs[i]] > 0.0) {
+            if (em.alpha_[trs[i]] >= 0.0) {
               double prob = em.alpha_[trs[i]] * wv[i] / denom;
               ua.push_back({trs[i],prob});
               if (bestProb < prob) {
@@ -2600,9 +2619,6 @@ void AlnProcessor::processBufferGenome() {
         }
         bestProbTr = trs[0];
       }
-
-      delete[] trs;
-      trs = nullptr;
 
       nmap = ua.size();
 
@@ -2652,7 +2668,7 @@ void AlnProcessor::processBufferGenome() {
           }
         }
 
-        auto strandednessInfo = [&](Kmer km, const_UnitigMap<Node>& val, const std::vector<std::pair<int, double>> &ua) -> std::pair<bool,bool> {
+        auto strandednessInfo = [&](Kmer km, const_UnitigMap<Node>& val, const std::vector<std::pair<int, double>> &ua, std::vector<uint32_t> &trs) -> std::pair<bool,bool> {
           val = index.dbg.find(km);
           bool reptrue = (km == km.rep());
           if (val.isEmpty) {
@@ -2671,8 +2687,9 @@ void AlnProcessor::processBufferGenome() {
             uint32_t bitmask = 0x7FFFFFFF;
             bool trsense = (v_ec[ec.minimum()]);
 
-            uint32_t* trs = new uint32_t[ec.cardinality()];
-            ec.toUint32Array(trs);
+            
+            trs.reserve(ec.cardinality());
+            ec.toUint32Array(trs.data());
             for (size_t i = 0; i < ec.cardinality(); ++i) {
               // If sense does not agree
               if ((!v_ec[trs[i]]) != trsense) {
@@ -2683,9 +2700,7 @@ void AlnProcessor::processBufferGenome() {
                 }
               }
             }
-            delete[] trs;
-            trs = nullptr;
-
+            
             return {true, trsense == val.strand};
           }
         };
@@ -2693,11 +2708,13 @@ void AlnProcessor::processBufferGenome() {
 
         if (!pi.r1empty) {
           km1 = Kmer(seqs[si1].first + seq1_offset + pi.k1pos);
-          strInfo1 = strandednessInfo(km1, val1, ua);
+          trs.clear();
+          strInfo1 = strandednessInfo(km1, val1, ua, trs);
         }
         if (paired && !pi.r2empty) {
           km2 = Kmer(seqs[si2].first + seq2_offset + pi.k2pos);
-          strInfo2 = strandednessInfo(km2, val2, ua);
+          trs.clear();
+          strInfo2 = strandednessInfo(km2, val2, ua, trs);
         }
 
         // first read is all on reverse strand
@@ -2715,19 +2732,86 @@ void AlnProcessor::processBufferGenome() {
         for (auto tp : ua) {
           auto t = tp.first;
           double prob = tp.second;
+          if (!(prob > 0.0)) {
+            continue;
+          }
           std::pair<int,bool> pos1, pos2;
+          std::vector<std::pair<int,bool>> p1v, p2v;
+
+          
+
+
+          auto findBestPos = [&](const std::vector<std::pair<int,bool>> &pv, int tr, const_UnitigMap<Node>& um, std::pair<const char*, int> seq, int kpos) -> std::pair<int,bool> {
+            std::pair<int,bool> bestPos = {std::numeric_limits<int>::min(), true};
+            
+            int bestScore = -1;
+            for (const auto& p : pv) {
+              int score = 0;
+              // and the position is the position of the last base, 1-based
+              const auto &trseq = index.target_seqs_[tr];
+              int trlen = trseq.size();
+              if (p.second) {
+                // on the forward strand
+                int tpos = p.first -1;
+                for (int i = 0; i < seq.second && tpos+i < trlen; i++) {
+                  if (seq.first[i] == trseq[tpos+i]) {
+                    score++;
+                  }
+                }
+              } else {
+                // on the reverse strand
+                int tpos_left = std::max(0, p.first - seq.second);
+                int tpos_right = std::min(trlen-1, p.first-1);
+                
+                std::string revseq = revcomp(std::string(seq.first, seq.second));
+                for (int i = tpos_right; i >= tpos_left; i--) {
+                  if (revseq[i - tpos_left] == trseq[i]) {
+                    score++;
+                  }
+                }
+              }
+            
+              if (score > bestScore) {
+                bestScore = score;
+                bestPos = p;
+              }
+            }
+
+            return bestPos;
+          };
+
 
           if (!pi.r1empty) {
-            pos1 = index.findPosition(t, km1, val1, pi.k1pos);
+            p1v = index.findPositions(t, km1, val1, pi.k1pos);
+            if (p1v.size()==1) {
+              pos1 = p1v[0];
+            } else if (p1v.size()>1) {
+              pos1 = findBestPos(p1v, t, val1, seqs[si1], pi.k1pos);
+              if (pos1.first == std::numeric_limits<int>::min()) {
+                std::cerr << "No valid position found for read 1" << std::endl;
+                exit(1);
+              }
+            }
+            
             int trpos = (pos1.second) ? pos1.first-1 : pos1.first - rlen1;
             if (!model.translateTrPosition(t, trpos, rlen1, pos1.second, tra1)) {
               continue;
-            }
+            }          
           }
 
           if (paired) {
             if (!pi.r2empty) {
-              pos2 = index.findPosition(t, km2, val2, pi.k2pos);
+              p2v = index.findPositions(t, km2, val2, pi.k2pos);
+              if (p2v.size()==1) {
+                pos2 = p2v[0];
+              } else if (p2v.size()>1) {
+                pos2 = findBestPos(p2v, t, val2, seqs[si2], pi.k2pos);
+                if (pos2.first == std::numeric_limits<int>::min()) {
+                  std::cerr << "No valid position found for read 2" << std::endl;
+                  exit(1);
+                }
+              }
+              
               int trpos = (pos2.second) ? pos2.first-1 : pos2.first - rlen2;
               if (!model.translateTrPosition(t, trpos, rlen2, pos2.second, tra2)) {
                 continue;
@@ -2762,7 +2846,7 @@ void AlnProcessor::processBufferGenome() {
             }
           }
           if (useEM) {
-            bestTra = alnmap.begin()->first; // arbitrary
+            //bestTra = alnmap.begin()->first; // arbitrary
           }
         }
 
@@ -2771,6 +2855,14 @@ void AlnProcessor::processBufferGenome() {
           float prob = (float) x.second; // explicit cast
 
           bool bestTr = (bestprob == 1.0) || (tra == bestTra);
+
+          if (!bestTr) {
+            continue;
+          }
+
+          if (prob < 0.5) {
+            continue;
+          }
 
           b1c = b1;
           // b1c.id = idnum++;
@@ -2885,6 +2977,7 @@ void AlnProcessor::processBufferGenome() {
       }
     }
   }
+
 
   // partition the vectors.
   int k = mp.numSortFiles;

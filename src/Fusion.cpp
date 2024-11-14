@@ -61,7 +61,7 @@ void printTranscripts(const KmerIndex& index, std::stringstream& o, const std::s
       o << ";";
     }
 
-    std::pair<int, bool> xp = index.findPosition(tr, km, um, p);
+    std::pair<int, bool> xp = index.findPosition(tr, km, p);
     o << "(" << index.target_names_[tr] << "," << xp.first << ",";
     if (xp.second) {
       o << "FW)";

@@ -156,7 +156,7 @@ void ParseOptionsIndex(int argc, char **argv, ProgramOptions& opt) {
 
 void ParseOptionsInspect(int argc, char **argv, ProgramOptions& opt) {
 
-  const char *opt_string = "G:g:b:t:";
+  const char *opt_string = "G:g:b:t:f:";
 
   int para_flag = 0;
   static struct option long_options[] = {
@@ -165,6 +165,7 @@ void ParseOptionsInspect(int argc, char **argv, ProgramOptions& opt) {
     {"gtf", required_argument, 0, 'g'},
     {"bed", required_argument, 0, 'b'},
     {"threads", required_argument, 0, 't'},
+    {"fasta", required_argument, 0, 'f'},
     {"paranoid", no_argument, &para_flag, 1},
     {0,0,0,0}
   };
@@ -198,13 +199,17 @@ void ParseOptionsInspect(int argc, char **argv, ProgramOptions& opt) {
       if (opt.threads <= 0) opt.threads = 1;
       break;
     }
+    case 'f': {
+      opt.transcriptsFile = optarg;
+      break;
+    }
     default: break;
     }
   }
   opt.index = argv[optind];
 
   if (para_flag) {
-    opt.inspect_thorough = true;
+    opt.inspect_thorough = true;    
   }
 }
 

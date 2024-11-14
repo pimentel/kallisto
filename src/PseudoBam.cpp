@@ -192,7 +192,7 @@ void outputPseudoBam(const KmerIndex &index, const Roaring& u,
         std::pair<int, bool> x1 {-1,true};
         std::pair<int, bool> x2 {-1,true};
         if (p1 != -1) {
-          x1 = index.findPosition(tr, km1, um1, p1);
+          x1 = index.findPosition(tr, km1, p1);
           if (p2 == -1) {
             x2 = {x1.first,!x1.second};
           }
@@ -208,7 +208,7 @@ void outputPseudoBam(const KmerIndex &index, const Roaring& u,
           f1 += 0x100; // secondary alignment
         }
         if (p2 != -1) {
-          x2 = index.findPosition(tr, km2 , um2, p2);
+          x2 = index.findPosition(tr, km2 ,  p2);
           if (p1 == -1) {
             x1 = {x2.first, !x2.second};
           }
@@ -247,7 +247,7 @@ void outputPseudoBam(const KmerIndex &index, const Roaring& u,
         std::pair<int, bool> x1 {-1,true};
         std::pair<int, bool> x2 {-1,true};
         if (p1 != -1) {
-          x1 = index.findPosition(tr, km1, um1, p1);
+          x1 = index.findPosition(tr, km1, p1);
           if (p2 == -1) {
             x2 = {x1.first,!x1.second};
           }
@@ -256,7 +256,7 @@ void outputPseudoBam(const KmerIndex &index, const Roaring& u,
           }
         }
         if (p2 != -1) {
-          x2 = index.findPosition(tr, km2, um2, p2);
+          x2 = index.findPosition(tr, km2, p2);
           if (p1 == -1) {
             x1 = {x2.first, !x2.second};
           }
@@ -313,7 +313,7 @@ void outputPseudoBam(const KmerIndex &index, const Roaring& u,
       bool firstTr = true;
       for (auto tr : u) {
         int f1 = 0;
-        auto x1 = index.findPosition(tr, km1, um, p1);
+        auto x1 = index.findPosition(tr, km1, p1);
 
         if (!x1.second) {
           f1 += 0x10;
@@ -396,6 +396,11 @@ void writePseudoAlignmentBatch(std::ofstream& of, const PseudoAlignmentBatch& ba
   of.write((char*)&(batch.batch_id), sizeof(int32_t));
   uint32_t bsz = batch.aln.size();
   of.write((char*)&(bsz), sizeof(uint32_t));
+
+  // Initialize a vector with 1KB capacity
+  std::vector<char> buffer;
+  buffer.reserve(1024);
+
   for(const auto &x : batch.aln) {
     of.write((char*)&x.id, sizeof(x.id));
     uint8_t flag = 0;
@@ -407,10 +412,21 @@ void writePseudoAlignmentBatch(std::ofstream& of, const PseudoAlignmentBatch& ba
     uint8_t k2 = (0 <= x.k2pos && x.k2pos < 255) ? x.k2pos : 255;
     of.write((char*)&k1, 1);
     of.write((char*)&k2, 1);
-    char* buffer = new char[x.ec.getSizeInBytes()];
-    size_t roaring_size = x.ec.write(buffer);
+
+    // Clear the buffer and ensure it has enough capacity
+    buffer.clear();
+    buffer.resize(x.ec.getSizeInBytes());
+
+    // Write the Roaring structure to the buffer
+    size_t roaring_size = x.ec.write(buffer.data());
+
+    // Resize the buffer to the actual size used
+    buffer.resize(roaring_size);
+
+    // Write the size and content of the Roaring structure
     of.write((char*)&roaring_size, sizeof(roaring_size));
-    of.write(buffer, roaring_size);
+    of.write(buffer.data(), roaring_size);
+
     of.write((char*)&x.barcode, sizeof(uint64_t));
     of.write((char*)&x.UMI, sizeof(uint64_t));
     of.put(0); // mark the end of record
@@ -429,6 +445,11 @@ void readPseudoAlignmentBatch(std::ifstream& in, PseudoAlignmentBatch& batch) {
   uint32_t bsz;
   in.read((char*)&bsz, sizeof(uint32_t));
   batch.aln.reserve(bsz);
+
+  // Initialize a vector with 1KB capacity
+  std::vector<char> buffer;
+  buffer.reserve(1024);
+
   for (int i = 0; i < bsz; i++) {
     PseudoAlignmentInfo info;
     in.read((char*)&info.id, sizeof(info.id));
@@ -445,11 +466,11 @@ void readPseudoAlignmentBatch(std::ifstream& in, PseudoAlignmentBatch& batch) {
     size_t roaring_size;
     in.read((char*)&roaring_size, sizeof(roaring_size));
 
-    char* buffer = new char[roaring_size];
-    in.read(buffer, roaring_size);
-    info.ec = info.ec.read(buffer);
-    delete[] buffer;
-    buffer = nullptr;
+    
+    buffer.resize(roaring_size);
+
+    in.read(buffer.data(), roaring_size);
+    info.ec = info.ec.read(buffer.data());
 
     in.read((char*)&info.barcode, sizeof(uint64_t));
     in.read((char*)&info.UMI, sizeof(uint64_t));
@@ -459,4 +480,3 @@ void readPseudoAlignmentBatch(std::ifstream& in, PseudoAlignmentBatch& batch) {
     batch.aln.push_back(std::move(info));
   }
 }
-

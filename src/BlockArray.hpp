@@ -303,6 +303,23 @@ class BlockArray {
             return vals;
         }
 
+        // Returns the ECs of the block up to and including the EC at idx
+        std::vector<T> get_trailing_vals(size_t idx) const {
+            std::vector<T> vals;
+            if (flag == 1 && mono.lb >= idx) {
+                vals.push_back(mono.val);
+            } else if (flag == 2) {
+                vals.reserve(poly.size());
+                for (const auto& b : poly) {
+                    if (b.lb >= idx) {
+                        vals.push_back(b.val);
+                    }
+                }
+            }
+
+            return vals;
+        }
+
         std::pair<uint32_t, uint32_t> get_block_at(size_t idx) const {
             if (flag == 1) {
                 return std::make_pair(mono.lb, mono.ub);
@@ -366,6 +383,14 @@ class BlockArray {
         }
 
         typename std::vector<block<T> >::iterator end() {
+            return poly.end();
+        }
+
+        typename std::vector<block<T> >::const_iterator begin() const {
+            return poly.begin();
+        }
+
+        typename std::vector<block<T> >::const_iterator end() const  {
             return poly.end();
         }
 
