@@ -2233,7 +2233,7 @@ void usageTCCQuant(bool valid_input = true) {
        << "                              (default: equivalence classes are taken from the index)" << endl
        << "-f, --fragment-file=FILE      File containing fragment length distribution" << endl
        << "                              (default: effective length normalization is not performed)" << endl
-       << "--long                        Use version of EM for long reads " << endl 
+       << "--long			                    Use version of EM for long reads " << endl 
        << "-P, --platform.               [PacBio or ONT] used for sequencing " << endl 
        << "-l, --fragment-length=DOUBLE  Estimated average fragment length" << endl
        << "-s, --sd=DOUBLE               Estimated standard deviation of fragment length" << endl
@@ -2433,7 +2433,7 @@ int main(int argc, char *argv[]) {
               	         if (fld_lr_c[i] > 0.5) {
 		             //Good results with comment below. 
 		             //flensout_f << std::fabs((double)fld_lr[i] / (double)fld_lr_c[i] - index.k);//index.target_lens_[i] - (double)fld_lr[i] / (double)fld_lr_c[i] - k); // take mean of recorded uniquely aligning read lengths 
- 		             flensout_f << std::fabs(((double)fld_lr[i] / (double)fld_lr_c[i]) - index.k);
+ 		             flensout_f << std::fabs(index.target_lens_[i] - ((double)fld_lr[i] / (double)fld_lr_c[i]) - index.k);
 		         } else {
 		              flensout_f << std::fabs(index.target_lens_[i] - index.k);//index.target_lens_[i]); 
 		         }
