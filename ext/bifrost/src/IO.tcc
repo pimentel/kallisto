@@ -408,7 +408,7 @@ typename std::enable_if<!is_void, void>::type CompactedDBG<U, G>::writeGFA_seque
 
         const std::string seq(unitig.referenceUnitigToString());
 
-        graph.write_sequence(std::to_string(labelA), seq.size(), seq, unitig.getData()->serialize(unitig));
+        graph.write_sequence(std::to_string(labelA), seq.size(), seq, /*unitig.getData()->serialize(unitig)*/"");
 
         if (unitig.isAbundant) idmap.insert(Kmer(unitig.referenceUnitigToString().c_str()), labelA);
 
